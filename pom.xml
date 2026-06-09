@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>local</groupId>
+    <artifactId>cie-cns-wedge</artifactId>
+    <version>1.0</version>
+    <packaging>jar</packaging>
+
+    <properties>
+        <maven.compiler.release>17</maven.compiler.release>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <!-- VERIFICA: controlla su Maven Central le ultime versioni disponibili. -->
+        <jmrtd.version>0.7.42</jmrtd.version>
+        <!-- IMPOSTA questa alla versione di scuba-sc-j2se presente su Central:
+             https://repo1.maven.org/maven2/net/sf/scuba/scuba-sc-j2se/
+             idealmente uguale alla versione di scuba-smartcards vista in
+             'mvn dependency:tree | findstr scuba'. -->
+        <scuba.version>0.0.20</scuba.version>
+        <bc.version>1.78.1</bc.version>
+    </properties>
+
+    <dependencies>
+        <!-- Source: https://mvnrepository.com/artifact/io.github.jnasmartcardio/jnasmartcardio -->
+
+        <dependency>
+            <groupId>org.jmrtd</groupId>
+            <artifactId>jmrtd</artifactId>
+            <version>${jmrtd.version}</version>
+        </dependency>
+        <!-- Contiene TerminalCardService (adattatore javax.smartcardio -> SCUBA).
+             NON arriva transitivamente da jMRTD (che porta solo il core scuba-smartcards),
+             quindi va dichiarato esplicitamente. -->
+        <dependency>
+            <groupId>net.sf.scuba</groupId>
+            <artifactId>scuba-sc-j2se</artifactId>
+            <version>${scuba.version}</version>
+        </dependency>
+        <!-- Crittografia richiesta da jMRTD per PACE -->
+        <dependency>
+            <groupId>org.bouncycastle</groupId>
+            <artifactId>bcprov-jdk18on</artifactId>
+            <version>${bc.version}</version>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <finalName>cie-cns-wedge</finalName>
+        <plugins>
+            <!-- Crea un fat-jar eseguibile con tutte le dipendenze incluse -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-shade-plugin</artifactId>
+                <version>3.5.1</version>
+                <executions>
+                    <execution>
+                        <phase>package</phase>
+                        <goals><goal>shade</goal></goals>
+                        <configuration>
+                            <transformers>
+                                <transformer
+                                        implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
+                                    <mainClass>IdentityServer</mainClass>
+                                </transformer>
+                            </transformers>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>

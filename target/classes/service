@@ -1,0 +1,23 @@
+# Servizio systemd per Linux/Raspberry.
+# Copia in /etc/systemd/system/identity.service, adatta i percorsi e l'API key, poi:
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now identity
+# Richiede pcscd attivo: sudo systemctl enable --now pcscd
+[Unit]
+Description=Servizio verifica identita CIE/TS-CNS
+After=pcscd.service
+Wants=pcscd.service
+
+[Service]
+Type=simple
+# headless: nessun tray, gira in background
+ExecStart=/usr/bin/java --add-modules java.smartcardio -jar /opt/identity/cie-cns-wedge.jar
+Environment=IDENTITY_APIKEY=CAMBIA_QUESTA_CHIAVE
+Environment=IDENTITY_PORT=8765
+Environment=IDENTITY_ORIGIN=*
+Restart=on-failure
+RestartSec=3
+User=pi
+
+[Install]
+WantedBy=multi-user.target

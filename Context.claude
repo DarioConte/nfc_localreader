@@ -1,0 +1,190 @@
+# Context dump — Servizio lettura identità CIE / TS-CNS / NFC
+
+> Documento di passaggio di consegne. Serve a riprendere il lavoro su un'altra postazione
+> (o in una nuova sessione di Claude) senza perdere il contesto. È scritto in italiano,
+> come tutta la sessione. In fondo c'è un **prompt pronto da incollare** a una nuova chat.
+
+---
+
+## 1. Cos'è il progetto
+
+Strumento da ufficio per **verifica identità**: legge la Tessera Sanitaria (TS-CNS), la Carta
+d'Identità Elettronica (CIE) e i tag NFC generici, tramite un lettore PC/SC **Bit4id**
+(contactless + a contatto). Espone una piccola **API HTTP locale** consumata da un gestionale.
+È partito come reader da console ed è diventato un servizio HTTP completo con system tray,
+endpoint multipli, firma HMAC, lookup comune di nascita, supporto multi-lettore e scrittura
+NFC (anche record strutturato "tessera socio").
+
+## 2. Ambiente dell'utente
+
+- Windows. JDK 22: `C:\Program Files\OpenLogic\jdk-22.0.2.9-hotspot`
+- IntelliJ IDEA 2024.1.1. Progetto in `C:\Users\conted\Downloads\identity`
+- Lettore Bit4id contactless + a contatto (PC/SC).
+- Carte di test:
+  - CIE reale: Conte Dario, CF `CNTDRA87H14G273R`, nato a Palermo, documento `CA53438GM`,
+    scadenza 2031-06-14.
+  - TS ACE 2021 (TS-CNS). ATR: `3B8B80010031C164092914540090006E`.
+
+## 3. Deliverable principale (questo progetto Maven)
+
+Cartella: `cie-cns-wedge/`
+
+- `pom.xml` — dipendenze:
+  - `org.jmrtd:jmrtd:0.7.42`
+  - `net.sf.scuba:scuba-sc-j2se:0.0.20` **(va dichiarata esplicitamente: contiene
+    `TerminalCardService`, non arriva per transitività)** — porta `scuba-smartcards:0.0.20`
+  - `org.bouncycastle:bcprov-jdk18on:1.78.1`
+  - `maven-shade-plugin`, `mainClass=IdentityServer`, `finalName=cie-cns-wedge`
+- `src/main/java/IdentityServer.java` — **classe principale unica** (~1330 righe).
+- `src/main/resources/comuni.csv` — 7894 righe, formato
+  `codicecatastale:comune:provincia:regione` (es. `G273:Palermo:PA:Sicilia`,
+  `H501:Roma:RM:Lazio`). Generato da `Elenco-comuni-italiani.xlsx`, foglio
+  "CODICI al 21_02_2026", colonne U=catastale, G=comune, K=regione, O=sigla provincia.
+- `README.md` — documentazione completa.
+- `deploy/identity.service` — unit systemd (Linux/Raspberry).
+- `deploy/windows-service/identity-service.xml` — configurazione WinSW (servizio Windows).
+
+File standalone storici (superati dal progetto Maven, ma ancora su disco): `CardConsoleClient.java`,
+`NfcNdefReader.java`, `CodiceFiscaleReader.java`, `KeyboardWedgeCF.java`, `CardWedgeCF.java`,
+`IdentityReaderServer.java`.
+
+## 4. Build & run
+
+```bash
+mvn -U clean package           # genera target/cie-cns-wedge.jar (fat jar)
+```
+
+Esecuzione (le opzioni `-D` vanno PRIMA di `-jar`; in IntelliJ vanno nel campo **VM options**,
+NON in "Program arguments"):
+
+```
+--add-modules java.smartcardio -Dapikey=... -Dsignkey=... -Dcryptokey=... -jar target/cie-cns-wedge.jar
+```
+
+Tre chiavi risolte all'avvio (system property OPPURE variabile d'ambiente; se assenti vengono
+auto-generate con warning):
+- `apikey` / `IDENTITY_APIKEY` — autenticazione header `X-API-Key`
+- `signkey` / `IDENTITY_SIGNKEY` — HMAC del `checksum`
+- `cryptokey` / `IDENTITY_CRYPTOKEY` — derivazione `chiaveAnagrafica`
+Altri: `port`/`IDENTITY_PORT` (8765), `origin`/`IDENTITY_ORIGIN` (CORS, default `*`).
+
+Ascolta su `127.0.0.1:8765`.
+
+## 5. Endpoint HTTP
+
+- `GET /actuator/health` → `{"status":"UP"}`
+- `GET /actuator/status?reader=X` → `{reader,cardPresent,tipo}` (tipo via `rileva`, senza lettura completa)
+- `GET /actuator/readers` → `{"readers":[{index,name,cardPresent}...]}`
+- `POST /check` (X-API-Key) body `{can,reader}` → JSON identità
+- `POST /write` (X-API-Key) → scrittura NFC (testo / hex+page / hex+block / **record socio**)
+- `POST /verify` (X-API-Key) → ricalcola l'HMAC sul payload ricevuto → `{valido,nonceConosciuto,checksumAtteso}`
+- `GET /` → console HTML di test (dropdown lettori, API key, CAN, testo da scrivere, riquadro tessera socio)
+
+**Multi-lettore**: parametro `reader` (indice o sottostringa del nome) su `/check`,`/write`,`/status`.
+Senza `reader` e con >1 carta presente → `controllaAmbiguita()` restituisce
+`{"errore":"Piu' carte inserite...","ambiguo":true,"readers":[...]}` forzando la scelta.
+Lettori diversi lavorano in parallelo (thread pool 4); stesso lettore serializzato.
+
+## 6. Schema payload uniforme (`finalizzaJson`)
+
+Campi comuni TS-CNS e CIE identici: `tipo, cognome, nome, codiceFiscale, sesso,
+dataNascita(ISO), cittadinanza, dataScadenza(ISO)`; poi derivati dal CF:
+`chiaveAnagrafica` (HMAC-SHA256(cryptokey, CF) — pseudonimo deterministico non reversibile),
+`codiceCatastale, comuneNascita, provinciaNascita, regione` (lookup `comuni.csv` via
+`catastaleFromCf`, che inverte l'omocodia sulle 3 cifre con la tabella LMNPQRSTUV→0-9);
+poi extra specifici (CIE: `numeroDocumento`; TS: `codiceEmettitore, dataEmissione, statura`);
+`uidCarta` (solo se letta in contactless); infine metadati: `letturaTimestamp(ISO)`, `nonce`,
+`checksum` (HMAC-SHA256(signkey) su tutti i campi tranne checksum, come `key=value\n` in ordine
+d'inserimento). `NONCE_EMESSI` = set in memoria limitato (cap 50000) per controllo replay
+best-effort.
+
+## 7. Conoscenza APDU / protocollo (soluzioni funzionanti)
+
+**TS-CNS**: SELECT MF `3F00` → DF `1100` → EF `1102` → READ BINARY. La TS ACE 2021 RIFIUTA
+P2=`0C` con SW `6A86`; richiede P2=`00`. La `select()` robusta prova P2=`0C` poi `00`, accetta
+SW `9000` o `61xx`. Preferire T=1 (`connectBest` prova "T=1" poi "*"). CF estratto via regex
+(gestisce omocodia). "Dati personali" CNS = header lunghezza ASCII di 6 byte, poi campi ognuno
+preceduto da 2 cifre esadecimali ASCII di lunghezza.
+
+**CIE** (jMRTD per PACE+CAN): `open()` → SELECT MF `3F00` (raw via `cs.transmit`, NECESSARIO
+altrimenti EF.CardAccess dà `6982`) → leggi `EF.CardAccess` (NON fare `sendSelectApplet(false)`
+prima) → `doPACE(CANKey)` → `sendSelectApplet(true)` → leggi DG1 (MRZ) + DG11. MRZ estratta dal
+TLV tag `5F1F` (NON con la regex "run più lungo": quel bug includeva il byte di lunghezza
+`0x5A`='Z' e sfasava i campi di 1). Il CF arriva da DG11 via regex (non dalla MRZ). MRZ TD1 = 90
+caratteri, 3×30. RESET della carta dopo il rilevamento (`disconnect(true)`) previene errori PACE
+`6986` intermittenti. CAN errato = errore al passo "authentication token" / SW `6982` →
+`CanException` → "Codice CAN Errato". Altri errori PACE (`6986` step 0 = stato transitorio) →
+NON canErrato, retry automatico una volta dopo 150 ms.
+
+**Tag NFC**: UID via `FF CA 00 00 00`. NTAG/Ultralight: lettura `FF B0 00 <page> 04`; testo NDEF
+nel TLV `0x03`. MIFARE Classic: `FF 82` load key, `FF 86` auth, `FF B0`/`FF D6` read/write con
+chiave default `FFFFFFFFFFFF`. Scrittura NTAG via `FF D6 00 <page> 04 <4 byte>`. Capacità dalla
+CC (page 3, byte 2) × 8.
+
+## 8. Novità ultima sessione
+
+1. **uidCarta**: catturato durante `rileva` (con `FF CA`, nella stessa connessione → niente
+   connessioni extra che rischiano il `6986`). `rileva` ora restituisce `Rilevazione{tipo,uid}`.
+   `leggiTsCns` restituisce `Map<String,String>` (o `null` se selezione fallisce);
+   `leggiCartaJson` inietta `uidCarta` e finalizza sia per TS sia per CIE. Presente solo in
+   lettura contactless; assente a contatto. **Nota onesta**: l'UID NON è prova forte (clonabile
+   su carte "magiche", assente a contatto). La prova robusta è il **successo di PACE** (CIE) +
+   il **checksum HMAC**.
+
+2. **Servizio Windows sempre attivo** via WinSW: `deploy/windows-service/identity-service.xml`.
+   Scaricare `WinSW-x64.exe`, rinominarlo `identity-service.exe`, metterlo con l'xml e il jar in
+   una cartella; adattare percorso `java.exe` e le 3 chiavi; da prompt admin:
+   `identity-service.exe install` e poi `start`. Gira in sessione 0 (niente tray, modalità
+   headless gestita), endpoint HTTP attivi. Alternativa: NSSM.
+   **Android NON è possibile** da questo codice (`javax.smartcardio`/PC-SC non esistono su
+   Android): servirebbe un progetto a parte (app con Foreground Service, `android.nfc`, libreria
+   PACE compatibile).
+
+3. **Scrittura "tessera socio"**: su `/write`, se non ci sono `text` né `hex` ma uno o più di
+   `chiaveAnagrafica`, `codiceSocio`, `codiceFamiliare`, `familiari` (lista separata da virgola),
+   il servizio costruisce un JSON compatto (`costruisciRecordSocio`) e lo scrive come testo NDEF.
+   In lettura, `leggiNfc` riconosce un record JSON sul tag e ne **espande** i campi nella
+   risposta (oltre a `ndefText`). Aggiunto il riquadro "Tessera socio" nella console di test
+   (`s_ka`, `s_cs`, `s_cf`, `s_fam` + pulsante "Scrivi tessera socio" → `scriviSocio()`).
+   La `chiaveAnagrafica` è 64 hex → spesso non sta in un NTAG213 (144 byte): usare NTAG215/216;
+   il controllo di capacità dà errore chiaro. **NDEF in chiaro non è a prova di manomissione**:
+   se serve, è stata offerta una firma HMAC del record verificabile offline (non ancora implementata).
+
+## 9. Packaging
+
+- Desktop (tray): `jpackage --type app-image --java-options "--add-modules java.smartcardio"`.
+- Servizio Windows: WinSW (vedi sopra) o NSSM.
+- Linux/Raspberry: `deploy/identity.service` (systemd).
+
+## 10. Note di sicurezza date all'utente
+
+- L'API key in JS lato browser non è un vero segreto: la protezione reale è il binding su
+  localhost. Restringere `IDENTITY_ORIGIN`.
+- `signkey`/`cryptokey` devono restare stabili e segrete, solo lato server.
+- `chiaveAnagrafica` è uno pseudonimo non reversibile (offerto AES se servisse reversibilità).
+- L'UID non è prova forte (clonabile, assente a contatto). PACE-ok + checksum HMAC = prova reale.
+- Cautele GDPR sul trattamento dei dati identità.
+
+## 11. In sospeso / possibili prossimi passi
+
+- (Opzionale) **Firma HMAC del record "tessera socio"** sul tag, da verificare offline col
+  `signkey`, per renderlo non falsificabile.
+- (Opzionale) Reversibilità della `chiaveAnagrafica` via AES, se richiesta.
+- (Eventuale) Progetto **Android** separato, se serve lettura CIE in NFC da tablet.
+
+## 12. Metodo di lavoro
+
+Dopo ogni modifica: verifica con `grep` e conteggio bilanciamento graffe
+(`grep -o '{' file | wc -l` vs `'}'`), poi `present_files`, poi spiegazione concisa in italiano
+con caveat onesti. L'utente compila/testa in IntelliJ e incolla qui i JSON o gli errori per iterare.
+
+---
+
+## Prompt da incollare a una nuova sessione di Claude
+
+> Sto continuando un progetto Java (Maven) che legge TS-CNS, CIE e tag NFC con un lettore PC/SC
+> Bit4id ed espone un'API HTTP locale per un gestionale. Ti allego il progetto `cie-cns-wedge`
+> (classe principale `src/main/java/IdentityServer.java`) e il file `CONTEXT-DUMP.md` con tutto
+> lo stato, le decisioni tecniche, gli APDU funzionanti, lo schema dei dati e le cose in sospeso.
+> Leggi prima `CONTEXT-DUMP.md`, poi aiutami a [DESCRIVI QUI COSA TI SERVE]. Rispondi in italiano,
+> sii diretto sui limiti di sicurezza e dopo ogni modifica verifica il bilanciamento delle graffe.
