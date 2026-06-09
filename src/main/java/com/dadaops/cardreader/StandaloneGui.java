@@ -66,6 +66,7 @@ final class StandaloneGui {
 
     private static volatile boolean busy = false;
     private static volatile boolean polling = false;
+    private static volatile boolean dialogoAperto = false;   // un popup modale è aperto: niente auto-letture
     private static String ultimaPresenza = null;
     private static final String[] ultimoJson = {""};
     private static final List<String[]> righeRaw = new ArrayList<>();
@@ -104,6 +105,12 @@ final class StandaloneGui {
         ETICHETTE.put("indirizzo", "Indirizzo");
         ETICHETTE.put("numeroPersonale", "Numero personale");
         ETICHETTE.put("numeroNazionale", "Numero nazionale");
+        ETICHETTE.put("riassuntoPersonale", "Descrizione personale");
+        ETICHETTE.put("custodia", "Custodia (minori)");
+        ETICHETTE.put("altriDocumenti", "Altri documenti");
+        ETICHETTE.put("dg13Presente", "Dati nazionali (DG13)");
+        ETICHETTE.put("dg13Testo", "DG13 — testo estratto");
+        ETICHETTE.put("notaChip", "Nota sul chip");
         ETICHETTE.put("chiaveAnagrafica", "Chiave anagrafica");
         ETICHETTE.put("tokenCarta", "Token carta");
         ETICHETTE.put("tokenCartaFonte", "Token carta (fonte)");
@@ -233,11 +240,12 @@ final class StandaloneGui {
         JButton copiaTsv = button("Copia tabella");
         JButton copiaJson = button("Copia JSON");
         JButton copiaToken = button("Copia token carta");
+        JButton wizard = button("Identifica (2 documenti)");
         JLabel stato = new JLabel(" ");
         stato.setForeground(MUTED);
         JPanel bottom = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 4));
         bottom.setOpaque(false);
-        bottom.add(copiaTsv); bottom.add(copiaJson); bottom.add(copiaToken);
+        bottom.add(copiaTsv); bottom.add(copiaJson); bottom.add(copiaToken); bottom.add(wizard);
         bottom.add(Box.createHorizontalStrut(16)); bottom.add(stato);
 
         root.add(north, BorderLayout.NORTH);
@@ -269,10 +277,11 @@ final class StandaloneGui {
         copiaToken.addActionListener(e -> { String tk = raw("tokenCarta");
             copia(tk == null ? "" : tk); stato.setText(tk == null ? "Nessun token carta." : "Token carta copiato."); });
         salvaFoto.addActionListener(e -> salvaFoto(f, stato));
+        wizard.addActionListener(e -> apriWizard(f, model, photo, salvaFoto, stato));
 
         Timer timer = new Timer(1200, null);
         timer.addActionListener(ev -> {
-            if (busy || polling) return;
+            if (busy || polling || dialogoAperto) return;
             polling = true;
             new Thread(() -> {
                 String st = CardReaderApi.status(null);
@@ -365,7 +374,128 @@ final class StandaloneGui {
         dlg.pack();
         dlg.setMinimumSize(new Dimension(420, dlg.getHeight()));
         dlg.setLocationRelativeTo(parent);
-        dlg.setVisible(true);
+        dialogoAperto = true;
+        try { dlg.setVisible(true); } finally { dialogoAperto = false; }
+    }
+
+    /** Mostra una risposta JSON arbitraria (anche l'identità unita) in tabella + foto. */
+    private static void displayResponse(String resp, DefaultTableModel model, JLabel photo, JButton salvaFoto, JLabel stato) {
+        // separa l'eventuale sotto-oggetto secondario "tesseraSanitaria" dai campi del documento principale
+        String[] sp = Json.estraiOggetto(resp, "tesseraSanitaria");
+        Map<String, String> campi = Json.parseFlatJsonOrdered(sp[0]);
+        Map<String, String> ts = sp[1] != null ? Json.parseFlatJsonOrdered(sp[1]) : null;
+        BufferedImage img = decodeFoto(campi.get("fotoBase64"));
+        ImageIcon icona = img != null ? scala(img, 230, 320) : null;
+        boolean jp2 = img == null && campi.get("fotoBase64") != null;
+        applica(campi, icona, jp2, model, photo);
+        appendGruppoTs(model, ts);
+        fotoCorrente = img; salvaFoto.setEnabled(img != null);
+        ultimoJson[0] = resp;
+        if (stato != null) {
+            boolean match = "true".equals(campi.get("corrispondenza"));
+            stato.setText(campi.containsKey("corrispondenza")
+                    ? ("Identità unita — corrispondenza: " + (match ? "✓ stessa persona" : "✗ DIVERSA"))
+                    : (campi.containsKey("errore") ? "Esito: " + campi.get("errore") : "Letto."));
+        }
+    }
+
+    /** Aggiunge in tabella i campi della Tessera Sanitaria (secondaria) sotto un separatore. */
+    private static void appendGruppoTs(DefaultTableModel model, Map<String, String> ts) {
+        if (ts == null || ts.isEmpty()) return;
+        righeRaw.add(new String[]{"__sep_ts__", "— Tessera Sanitaria (secondaria) —", "", ""});
+        model.addRow(new Object[]{"— Tessera Sanitaria (secondaria) —", "", ""});
+        for (Map.Entry<String, String> e : ts.entrySet()) {
+            String k = e.getKey();
+            if (k.endsWith("Base64") && (k.startsWith("foto") || k.startsWith("firma"))) continue;
+            String etich = etichetta(k);
+            String vis = formattaValore(e.getValue());
+            righeRaw.add(new String[]{k, etich, vis, e.getValue()});
+            model.addRow(new Object[]{etich, vis, "Copia"});
+        }
+    }
+
+    /**
+     * Wizard di identificazione a 2 documenti. Si legge PRIMA la Tessera Sanitaria: da lì si ricava
+     * già la data di nascita (e il CF certificato + luogo di nascita), così per il passaporto basta
+     * chiedere numero documento e scadenza. Poi si unisce e si verifica la corrispondenza.
+     */
+    private static void apriWizard(JFrame parent, DefaultTableModel model, JLabel photo, JButton salvaFoto, JLabel stato) {
+        JDialog dlg = new JDialog(parent, "Identificazione — 2 documenti", true);
+        final String[] jTs = {null}, jDoc = {null}, nascitaTs = {null};
+
+        JButton leggiTs = primario("Leggi Tessera Sanitaria");
+        JLabel s1 = etic("non letta");
+        JTextField wCan = new JTextField(8), wDoc = new JTextField(11);
+        DatePicker wS = new DatePicker(Year.now().getValue() - 5, Year.now().getValue() + 15);
+        JLabel nascitaLbl = etic("—");
+        JButton leggiDoc = primario("Leggi documento");
+        leggiDoc.setEnabled(false);                 // sbloccato solo dopo la TS (ci serve la nascita)
+        JLabel s2 = etic("prima leggi la Tessera Sanitaria");
+        JButton unisci = primario("Unisci e mostra");
+        unisci.setEnabled(false);
+
+        Runnable verificaPronto = () -> unisci.setEnabled(ok(jTs[0]) && ok(jDoc[0]));
+
+        leggiTs.addActionListener(e -> {
+            s1.setText("lettura…"); leggiTs.setEnabled(false);
+            new Thread(() -> {
+                String r = CardReaderApi.check(null, null, false, null, null, null, false);
+                SwingUtilities.invokeLater(() -> {
+                    jTs[0] = r;
+                    Map<String, String> m = Json.parseFlatJsonOrdered(r);
+                    nascitaTs[0] = m.get("dataNascita");
+                    s1.setText(riassunto("TS", r));
+                    leggiTs.setEnabled(true);
+                    boolean tsOk = ok(r);
+                    nascitaLbl.setText(nascitaTs[0] != null ? "dalla TS: " + formattaValore(nascitaTs[0])
+                            : (tsOk ? "non presente nella TS" : "—"));
+                    leggiDoc.setEnabled(tsOk);
+                    s2.setText(tsOk ? "non letto" : "TS non letta: riprova");
+                    verificaPronto.run();
+                });
+            }, "wiz-ts").start();
+        });
+        leggiDoc.addActionListener(e -> {
+            s2.setText("lettura…"); leggiDoc.setEnabled(false);
+            new Thread(() -> {
+                String r = CardReaderApi.check(t(wCan), null, true, t(wDoc), nascitaTs[0], wS.iso(), false);
+                SwingUtilities.invokeLater(() -> { jDoc[0] = r; s2.setText(riassunto("doc", r)); leggiDoc.setEnabled(true); verificaPronto.run(); });
+            }, "wiz-doc").start();
+        });
+        unisci.addActionListener(e -> {
+            String merged = CardReaderApi.merge(jTs[0], jDoc[0]);
+            displayResponse(merged, model, photo, salvaFoto, stato);
+            dlg.dispose();
+        });
+
+        JPanel slot1 = colonna(titoloDlg("1) Tessera Sanitaria"),
+                etic("Appoggia la TS-CNS: prendo codice fiscale certificato, luogo e data di nascita."),
+                affianca(leggiTs, s1));
+        JPanel slot2 = colonna(titoloDlg("2) Documento con foto (CIE / Passaporto)"),
+                etic("CIE → CAN. Passaporto → numero documento e scadenza (la nascita arriva dalla TS)."),
+                affianca(new JLabel("Data di nascita:"), nascitaLbl),
+                affianca(new JLabel("CAN (solo CIE):"), wCan),
+                affianca(new JLabel("N. documento:"), wDoc, new JLabel("  Scadenza:"), wS),
+                affianca(leggiDoc, s2));
+        JPanel content = colonna(slot1, Box.createVerticalStrut(8), slot2, Box.createVerticalStrut(12), affianca(unisci));
+        content.setBorder(new EmptyBorder(18, 20, 18, 20));
+        dlg.setContentPane(content);
+        dlg.pack();
+        dlg.setMinimumSize(new Dimension(560, dlg.getHeight()));
+        dlg.setLocationRelativeTo(parent);
+        dialogoAperto = true;
+        try { dlg.setVisible(true); } finally { dialogoAperto = false; }
+    }
+
+    private static boolean ok(String json) {
+        return json != null && !Json.parseFlatJsonOrdered(json).containsKey("errore");
+    }
+
+    private static String riassunto(String pref, String json) {
+        Map<String, String> m = Json.parseFlatJsonOrdered(json);
+        if (m.containsKey("errore")) return "errore: " + m.get("errore");
+        String n = (m.getOrDefault("cognome", "") + " " + m.getOrDefault("nome", "")).trim();
+        return "letto: " + (n.isEmpty() ? m.getOrDefault("tipo", "?") : n);
     }
 
     private static void applica(Map<String, String> campi, ImageIcon icona, boolean jp2,

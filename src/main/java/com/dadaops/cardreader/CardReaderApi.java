@@ -68,6 +68,54 @@ public final class CardReaderApi {
                 + ",\"checksumAtteso\":" + jstr(atteso) + "}";
     }
 
+    /**
+     * Unisce due letture (Tessera Sanitaria + passaporto/CIE) in un'unica identità. Il documento con
+     * foto è il PRINCIPALE (anagrafica, date, riferimenti alla radice, come una lettura singola); la
+     * Tessera Sanitaria è secondaria nel sotto-oggetto {@code tesseraSanitaria}. Vedi {@link IdentityMerge}.
+     */
+    public static String merge(String jsonDocumentoA, String jsonDocumentoB) {
+        try { return IdentityMerge.mergeJson(jsonDocumentoA, jsonDocumentoB); }
+        catch (Exception e) { return "{\"errore\":" + jstr(String.valueOf(e.getMessage())) + "}"; }
+    }
+
+    /**
+     * Flow identità — passo 1: legge la PRIMA carta (tipicamente la Tessera Sanitaria) e la tiene in
+     * memoria server-side in una sessione, da unire poi con la seconda. Se la lettura fallisce NON
+     * apre alcuna sessione e ritorna l'errore. Risposta: {@code {session, scadeTraSecondi, primaLettura}}.
+     */
+    public static String identityBegin(String can, String reader, boolean foto,
+                                       String documentNumber, String dateOfBirth, String dateOfExpiry) {
+        String prima = check(can, reader, foto, documentNumber, dateOfBirth, dateOfExpiry, false);
+        if (Json.jsonField(prima, "errore") != null) return prima;
+        String id = IdentitySession.crea(prima);
+        return "{\"session\":" + jstr(id) + ",\"scadeTraSecondi\":" + IdentitySession.TTL_SEC
+                + ",\"primaLettura\":" + prima + "}";
+    }
+
+    /**
+     * Flow identità — passo 2: legge la SECONDA carta (es. passaporto/CIE) e la unisce alla prima
+     * tenuta in {@code session}. La data di nascita per la chiave MRZ, se non passata, viene ripresa
+     * dalla prima lettura. La sessione si chiude solo se la seconda lettura riesce (così è ripetibile
+     * in caso di errore). Ritorna l'identità unita, o un errore se la sessione è scaduta/inesistente.
+     */
+    public static String identityComplete(String session, String can, String reader, boolean foto,
+                                          String documentNumber, String dateOfBirth, String dateOfExpiry) {
+        String prima = IdentitySession.leggi(session);
+        if (prima == null) return "{\"errore\":\"sessione assente o scaduta\"}";
+        if (!notBlank(dateOfBirth)) dateOfBirth = Json.jsonField(prima, "dataNascita");
+        String seconda = check(can, reader, foto, documentNumber, dateOfBirth, dateOfExpiry, false);
+        if (Json.jsonField(seconda, "errore") != null) return seconda;   // sessione conservata: riprovabile
+        IdentitySession.consuma(session);
+        try { return IdentityMerge.mergeJson(prima, seconda); }
+        catch (Exception e) { return "{\"errore\":" + jstr(String.valueOf(e.getMessage())) + "}"; }
+    }
+
+    /** Flow identità — annulla una sessione aperta (scarta la prima lettura in memoria). */
+    public static String identityCancel(String session) {
+        boolean c = IdentitySession.annulla(session);
+        return "{\"annullata\":" + c + "}";
+    }
+
     /** Contenuto di una risorsa bundled (es. "/console.html", "/openapi.yaml"); null se assente. */
     public static byte[] resource(String name) {
         try (InputStream is = CardReaderApi.class.getResourceAsStream(name)) {

@@ -15,7 +15,9 @@
 /Users/dario/Development/nfc_localreader/src/main/java/com/dadaops/cardreader/EmvReader.java
 /Users/dario/Development/nfc_localreader/src/main/java/com/dadaops/cardreader/FiscalCode.java
 /Users/dario/Development/nfc_localreader/src/main/java/com/dadaops/cardreader/Hex.java
+/Users/dario/Development/nfc_localreader/src/main/java/com/dadaops/cardreader/IdentityMerge.java
 /Users/dario/Development/nfc_localreader/src/main/java/com/dadaops/cardreader/IdentityServer.java
+/Users/dario/Development/nfc_localreader/src/main/java/com/dadaops/cardreader/IdentitySession.java
 /Users/dario/Development/nfc_localreader/src/main/java/com/dadaops/cardreader/ImageDecoder.java
 /Users/dario/Development/nfc_localreader/src/main/java/com/dadaops/cardreader/Json.java
 /Users/dario/Development/nfc_localreader/src/main/java/com/dadaops/cardreader/Mrz.java

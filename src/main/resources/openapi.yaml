@@ -95,32 +95,65 @@ components:
       properties:
         tipo:
           type: string
-          description: CIE | TS-CNS | PASSAPORTO | "CARTA D'IDENTITA <PAESE>" | "Carta di credito" | NFC
+          description: >
+            CIE | TS-CNS | PASSAPORTO | "CARTA D'IDENTITA <PAESE>" | "Carta di credito" | NFC |
+            "IDENTITÀ UNITA" (risultato del flow a 2 documenti /identity/*). Per la categoria
+            normalizzata usare `categoriaDocumento`; per il tipo MRZ usare `tipoDocumento`.
         cognome: { type: string }
         nome: { type: string }
         nomeCompleto: { type: string }
-        codiceFiscale: { type: string }
+        codiceFiscale:
+          type: string
+          description: >
+            Identificativo fiscale ITA. CERTIFICATO se da CIE/TS (`codiceFiscaleCertified:true`),
+            altrimenti CALCOLATO dal passaporto (`codiceFiscaleCertified:false` +
+            `codiceFiscaleDaVerificare:true`). Nell'identità unita prevale sempre quello certificato
+            della TS e i marcatori "calcolato/da verificare" vengono rimossi.
         codiceFiscaleCertified:
           type: boolean
           description: true se letto dal documento (CIE/TS), false se calcolato (passaporto)
+        codiceFiscaleCalcolato:
+          type: string
+          description: CF calcolato dai dati del passaporto (presente solo se non certificato)
+        codiceFiscaleDaVerificare:
+          type: boolean
+          description: true quando il CF è calcolato e va confermato (es. leggendo la TS)
         codiceFiscaleNota: { type: string }
         sesso: { type: string, enum: [M, F] }
         dataNascita: { type: string, format: date }
-        luogoNascita: { type: string }
-        comuneNascita: { type: string }
-        provinciaNascita: { type: string }
+        luogoNascita:
+          type: string
+          description: >
+            Luogo di nascita CANONICO e leggibile, SEMPRE valorizzato quando il dato esiste: dal
+            documento (MRZ/DG11) se presente, altrimenti sintetizzato come "COMUNE (PROV)" dai campi
+            strutturati (TS-CNS) o come Stato estero. Mappare QUI il luogo di nascita nel CRM.
+        comuneNascita: { type: string, description: Comune (strutturato) — solo nati in Italia }
+        provinciaNascita: { type: string, description: Sigla provincia — solo nati in Italia }
         regione: { type: string }
-        statoNascita: { type: string }
+        statoNascita: { type: string, description: Stato estero — solo nati all'estero }
         natoEstero: { type: boolean }
         codiceCatastale: { type: string, description: Codice Belfiore (de-omocodato) }
         cittadinanza: { type: string }
         numeroDocumento: { type: string }
+        categoriaDocumento: { type: string, description: "categoria normalizzata: passaporto | carta d'identità" }
+        paese: { type: string, description: Paese emittente (nome esteso, MAIUSCOLO) }
+        unioneEuropea: { type: boolean }
         statoEmissione: { type: string, description: ISO-3166 alpha-3 (es. ITA, FRA) }
-        tipoDocumento: { type: string }
+        tipoDocumento: { type: string, description: codice tipo da MRZ (es. P, ID) }
         dataScadenza: { type: string, format: date }
         dataEmissione: { type: string, format: date }
         autoritaEmittente: { type: string }
         indirizzo: { type: string }
+        numeroNazionale:
+          type: string
+          description: >
+            Identificativo nazionale per documenti esteri (es. CNP rumeno, RNTRC ucraino, NID
+            albanese). Per i documenti ITA l'identificativo è `codiceFiscale`.
+        numeroPersonale: { type: string, description: numero personale grezzo da DG11 (se non è un CF) }
+        statura: { type: string, description: altezza in cm (solo TS-CNS) }
+        riassuntoPersonale: { type: string }
+        custodia: { type: string }
+        altriDocumenti: { type: string }
         telefono: { type: string }
         professione: { type: string }
         chiaveAnagrafica: { type: string, description: HMAC pseudonimo del CF }
@@ -139,6 +172,28 @@ components:
         idChip: { type: string, description: Hash della chiave AA (DG15), stabile per chip }
         idDocumento: { type: string, description: HMAC della firma SOD, stabile per documento }
         algoritmoHashSOD: { type: string }
+        notaChip: { type: string, description: nota sui data group assenti/protetti del chip }
+        dg13Presente: { type: boolean }
+        dg13Testo: { type: string, description: testo stampabile estratto dal DG13 (dati nazionali) }
+        nomiTraslitterati: { type: boolean, description: nomi resi in caratteri latini (cirillico/greco) }
+        # --- flow identità a 2 documenti (/identity/*): TS-CNS + passaporto/CIE ---
+        corrispondenza:
+          type: boolean
+          description: >
+            Presente SOLO nell'IDENTITÀ UNITA. true se le due carte sono della stessa persona
+            (match su cognome+nome e, se disponibile, data di nascita). Il CF è informativo, non
+            entra nel verdetto (il CF calcolato non risolve l'omocodia).
+        matchDettaglio: { type: string, description: dettaglio match per campo (cognome/nome/nascita/sesso/CF) }
+        documentoPrincipale: { type: string, description: "tipo del documento con foto da cui vengono i campi di radice (es. Passaporto, CIE)" }
+        documentiUniti: { type: string, example: "Passaporto + TS-CNS" }
+        tesseraSanitaria:
+          type: object
+          additionalProperties: true
+          description: >
+            SOLO nell'IDENTITÀ UNITA. Dati SECONDARI della Tessera Sanitaria (NON il documento
+            principale): codice fiscale certificato, comune/provincia di nascita, codice emettitore,
+            statura, ecc. I campi di radice (anagrafica, date, riferimenti) vengono invece dal
+            documento con foto. Stessi nomi-campo di una lettura TS-CNS singola.
         # --- carta di pagamento EMV ---
         numeroCarta: { type: string, description: PAN in chiaro (perimetro PCI-DSS) }
         scadenza: { type: string, example: "12/2028" }
@@ -296,6 +351,95 @@ paths:
         content: { application/json: { schema: { $ref: '#/components/schemas/VerifyRequest' } } }
       responses:
         '200': { description: Esito verifica, content: { application/json: { schema: { $ref: '#/components/schemas/VerifyResponse' } } } }
+        '401': { description: API key non valida, content: { application/json: { schema: { $ref: '#/components/schemas/Errore' } } } }
+
+  /merge:
+    post:
+      summary: Unisce due letture già fatte (stateless)
+      description: Fonde i JSON di due documenti (es. TS-CNS + passaporto) in un'unica identità con verifica di corrispondenza. Il client trasporta entrambe le letture.
+      security: [ { ApiKeyAuth: [] } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                documentoA: { type: string, description: JSON della prima lettura }
+                documentoB: { type: string, description: JSON della seconda lettura }
+      responses:
+        '200': { description: Identità unita, content: { application/json: { schema: { $ref: '#/components/schemas/Documento' } } } }
+        '401': { description: API key non valida, content: { application/json: { schema: { $ref: '#/components/schemas/Errore' } } } }
+
+  /identity/begin:
+    post:
+      summary: Flow identità (1/2) — legge la prima carta e apre una sessione
+      description: >
+        Legge la PRIMA carta (tipicamente la Tessera Sanitaria: codice fiscale certificato, luogo e
+        data di nascita) e la tiene in memoria server-side in una sessione con TTL. Stessi parametri
+        di /check. Se la lettura fallisce non apre alcuna sessione e ritorna l'errore.
+      security: [ { ApiKeyAuth: [] } ]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CheckRequest' }
+            examples:
+              tsCns: { summary: Tessera Sanitaria, value: { foto: false } }
+      responses:
+        '200':
+          description: Sessione aperta con la prima lettura
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  session: { type: string }
+                  scadeTraSecondi: { type: integer }
+                  primaLettura: { $ref: '#/components/schemas/Documento' }
+        '401': { description: API key non valida, content: { application/json: { schema: { $ref: '#/components/schemas/Errore' } } } }
+
+  /identity/complete:
+    post:
+      summary: Flow identità (2/2) — legge la seconda carta e unisce
+      description: >
+        Legge la SECONDA carta (es. passaporto/CIE) e la unisce alla prima tenuta in `session`. La
+        data di nascita per la chiave MRZ, se non passata, viene ripresa dalla prima lettura. La
+        sessione si chiude solo se la seconda lettura riesce (così è ripetibile in caso di errore).
+      security: [ { ApiKeyAuth: [] } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - { $ref: '#/components/schemas/CheckRequest' }
+                - type: object
+                  required: [ session ]
+                  properties:
+                    session: { type: string, description: id sessione da /identity/begin }
+            examples:
+              passaporto: { summary: Passaporto come seconda carta, value: { session: "<id>", documentNumber: "YA1234567", dateOfExpiry: "300620", foto: true } }
+      responses:
+        '200': { description: Identità unita, content: { application/json: { schema: { $ref: '#/components/schemas/Documento' } } } }
+        '401': { description: API key non valida, content: { application/json: { schema: { $ref: '#/components/schemas/Errore' } } } }
+
+  /identity/cancel:
+    post:
+      summary: Flow identità — annulla una sessione aperta
+      security: [ { ApiKeyAuth: [] } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ session ]
+              properties: { session: { type: string } }
+      responses:
+        '200':
+          description: Esito annullamento
+          content: { application/json: { schema: { type: object, properties: { annullata: { type: boolean } } } } }
         '401': { description: API key non valida, content: { application/json: { schema: { $ref: '#/components/schemas/Errore' } } } }
 
   /openapi.yaml:

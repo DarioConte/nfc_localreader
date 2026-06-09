@@ -175,6 +175,19 @@ final class EmrtdReader {
             Collections.sort(dgs);
             if (!dgs.isEmpty()) out.put("dataGroupPresenti", dgs.toString());
             putIf(out, "versioneLDS", com.getLDSVersion());
+
+            // Spiega cosa NON c'è sul chip (i campi mancanti non sono un bug: non sono memorizzati).
+            List<String> note = new ArrayList<>();
+            if (dgs.contains(3) || dgs.contains(4))
+                note.add("impronte/iride presenti ma protette (EAC): non leggibili senza certificato di Stato");
+            if (!dgs.contains(11))
+                note.add("luogo di nascita, residenza e numero personale NON sul chip (DG11 assente)");
+            if (!dgs.contains(12))
+                note.add("data e autorità di rilascio NON sul chip (DG12 assente)");
+            if (!dgs.contains(13))
+                note.add("dati nazionali (es. statura) NON sul chip (DG13 assente)");
+            note.add("colore occhi/statura non sono campi dello standard eMRTD: solo stampati sul documento");
+            out.put("notaChip", String.join("; ", note));
         } catch (Exception ignored) {}
 
         if (includiFoto) try {
@@ -203,6 +216,33 @@ final class EmrtdReader {
                 out.put("idDocumento", hmacWith(AppContext.CRYPTO_KEY, "sod:" + hex(sha256(firma))));
             try { putIf(out, "algoritmoHashSOD", sod.getDigestAlgorithm()); } catch (Exception ignored) {}
         } catch (Exception ignored) {}
+
+        // DG13: dati NAZIONALI in formato proprietario (non standard ICAO). jMRTD non lo modella:
+        // lo esponiamo grezzo (hex) + il testo stampabile estratto, così eventuali campi nazionali
+        // (es. statura su alcune carte) sono comunque visibili da ispezionare.
+        try {
+            byte[] dg13 = readAll(ps.getInputStream(PassportService.EF_DG13));
+            if (dg13 != null && dg13.length > 2) {
+                out.put("dg13Presente", "true");
+                String testo = testoStampabile(dg13);
+                if (!testo.isBlank()) putIf(out, "dg13Testo", testo);
+            }
+        } catch (Exception ignored) { /* DG13 assente */ }
+    }
+
+    /** Estrae le sequenze di caratteri stampabili (>=3) da un blob binario (per DG13 proprietario). */
+    private static String testoStampabile(byte[] b) {
+        StringBuilder sb = new StringBuilder(), cur = new StringBuilder();
+        for (byte x : b) {
+            int c = x & 0xFF;
+            if (c >= 0x20 && c < 0x7F) cur.append((char) c);
+            else {
+                if (cur.length() >= 3) { if (sb.length() > 0) sb.append(" | "); sb.append(cur.toString().trim()); }
+                cur.setLength(0);
+            }
+        }
+        if (cur.length() >= 3) { if (sb.length() > 0) sb.append(" | "); sb.append(cur.toString().trim()); }
+        return sb.toString();
     }
 
     private static int dgDaTag(int tag) {
@@ -229,6 +269,9 @@ final class EmrtdReader {
         putIf(out, "telefono", pulisci(dg11.getTelephone()));
         putIf(out, "professione", pulisci(dg11.getProfession()));
         putIf(out, "titolo", pulisci(dg11.getTitle()));
+        putIf(out, "riassuntoPersonale", pulisci(dg11.getPersonalSummary()));   // descrizione libera (alcuni Stati)
+        putIf(out, "custodia", pulisci(dg11.getCustodyInformation()));
+        putIf(out, "altriDocumenti", unisciLista(dg11.getOtherValidTDNumbers()));
         String fdob = isoDaCompatta(dg11.getFullDateOfBirth());
         if (fdob != null) out.put("dataNascita", fdob);
     }

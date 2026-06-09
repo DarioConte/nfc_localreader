@@ -55,6 +55,8 @@ final class DocumentBuilder {
         for (Map.Entry<String, String> e : dati.entrySet())
             if (!out.containsKey(e.getKey())) out.put(e.getKey(), e.getValue()); // campi specifici
 
+        normalizzaLuogoNascita(out);
+
         for (String k : new String[]{"tipo", "luogoNascita", "comuneNascita", "provinciaNascita", "regione", "statoNascita", "paese"})
             if (out.containsKey(k) && out.get(k) != null) out.put(k, out.get(k).toUpperCase());
 
@@ -91,6 +93,25 @@ final class DocumentBuilder {
                 + "DA VERIFICARE (es. leggendo poi la Tessera Sanitaria). Non risolve l'omocodia.");
         out.put("codiceCatastale", cat);
         risolviLuogoNascita(out, cat);
+    }
+
+    /**
+     * Garantisce il campo canonico {@code luogoNascita} (testo leggibile) anche quando il documento
+     * fornisce solo i campi strutturati: TS-CNS dà comune+provincia, l'estero solo lo Stato. Così il
+     * CRM mappa SEMPRE il luogo di nascita dalla stessa chiave, qualunque sia la carta. Riempie solo
+     * se assente: non sovrascrive il valore già presente sul documento (es. luogo da MRZ/DG11).
+     */
+    static void normalizzaLuogoNascita(Map<String, String> out) {
+        String l = out.get("luogoNascita");
+        if (l != null && !l.isBlank()) return;
+        String comune = out.get("comuneNascita");
+        if (comune != null && !comune.isBlank()) {
+            String prov = out.get("provinciaNascita");
+            out.put("luogoNascita", prov != null && !prov.isBlank() ? comune + " (" + prov + ")" : comune);
+            return;
+        }
+        String stato = out.get("statoNascita");
+        if (stato != null && !stato.isBlank()) out.put("luogoNascita", stato);
     }
 
     /**

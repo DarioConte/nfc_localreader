@@ -13,7 +13,8 @@ final class Json {
 
     /** Campi emessi come booleani veri (non tra virgolette). Valore interno "true"/"false". */
     static final Set<String> BOOL_KEYS = Set.of("codiceFiscaleCertified", "codiceFiscaleDaVerificare",
-            "natoEstero", "chipAuthentication", "activeAuthentication", "uidCasuale", "unioneEuropea", "nomiTraslitterati");
+            "natoEstero", "chipAuthentication", "activeAuthentication", "uidCasuale", "unioneEuropea",
+            "nomiTraslitterati", "dg13Presente", "corrispondenza");
 
     static String jstr(String s) {
         if (s == null) return "null";
@@ -101,6 +102,34 @@ final class Json {
             } else sb.append(c);
         }
         return sb.toString();
+    }
+
+    /**
+     * Estrae un oggetto annidato {@code "chiave":{...}} bilanciando le graffe (gestendo le stringhe).
+     * Ritorna [corpoSenzaQuelOggetto, jsonInternoDellOggetto]; il secondo è null se la chiave manca.
+     * Serve ai consumatori "flat" (GUI) per non confondere i campi del sotto-oggetto con quelli radice.
+     */
+    static String[] estraiOggetto(String body, String chiave) {
+        if (body == null) return new String[]{null, null};
+        String marker = "\"" + chiave + "\":{";
+        int i = body.indexOf(marker);
+        if (i < 0) return new String[]{body, null};
+        int braceStart = i + marker.length() - 1;       // posizione della '{'
+        int depth = 0, j = braceStart;
+        boolean inStr = false;
+        for (; j < body.length(); j++) {
+            char c = body.charAt(j);
+            if (inStr) {
+                if (c == '\\') j++;
+                else if (c == '"') inStr = false;
+            } else if (c == '"') inStr = true;
+            else if (c == '{') depth++;
+            else if (c == '}' && --depth == 0) { j++; break; }
+        }
+        String inner = body.substring(braceStart, j);   // "{...}"
+        int removeStart = (i > 0 && body.charAt(i - 1) == ',') ? i - 1 : i;
+        String resto = body.substring(0, removeStart) + body.substring(j);
+        return new String[]{resto, inner};
     }
 
     static String jsonField(String body, String name) {

@@ -79,6 +79,34 @@ public final class ApiRouter {
                 if (!authOk(apiKey)) return Response.json(401, "{\"errore\":\"API key non valida\"}");
                 return Response.json(200, CardReaderApi.verify(body));
             }
+            case "/merge": {
+                if (!"POST".equalsIgnoreCase(method)) return Response.json(405, "{\"errore\":\"Usare POST\"}");
+                if (!authOk(apiKey)) return Response.json(401, "{\"errore\":\"API key non valida\"}");
+                return Response.json(200, CardReaderApi.merge(jsonField(body, "documentoA"), jsonField(body, "documentoB")));
+            }
+            case "/identity/begin": {
+                if (!"POST".equalsIgnoreCase(method)) return Response.json(405, "{\"errore\":\"Usare POST\"}");
+                if (!authOk(apiKey)) return Response.json(401, "{\"errore\":\"API key non valida\"}");
+                String reader = orQuery(jsonField(body, "reader"), query, "reader");
+                boolean foto = jsonBool(body, "foto") || flag(query, "foto");
+                return Response.json(200, CardReaderApi.identityBegin(extractCan(body, query), reader, foto,
+                        jsonField(body, "documentNumber"), jsonField(body, "dateOfBirth"), jsonField(body, "dateOfExpiry")));
+            }
+            case "/identity/complete": {
+                if (!"POST".equalsIgnoreCase(method)) return Response.json(405, "{\"errore\":\"Usare POST\"}");
+                if (!authOk(apiKey)) return Response.json(401, "{\"errore\":\"API key non valida\"}");
+                String reader = orQuery(jsonField(body, "reader"), query, "reader");
+                boolean foto = jsonBool(body, "foto") || flag(query, "foto");
+                return Response.json(200, CardReaderApi.identityComplete(orQuery(jsonField(body, "session"), query, "session"),
+                        extractCan(body, query), reader, foto,
+                        jsonField(body, "documentNumber"), jsonField(body, "dateOfBirth"), jsonField(body, "dateOfExpiry")));
+            }
+            case "/identity/cancel": {
+                if (!"POST".equalsIgnoreCase(method) && !"DELETE".equalsIgnoreCase(method))
+                    return Response.json(405, "{\"errore\":\"Usare POST o DELETE\"}");
+                if (!authOk(apiKey)) return Response.json(401, "{\"errore\":\"API key non valida\"}");
+                return Response.json(200, CardReaderApi.identityCancel(orQuery(jsonField(body, "session"), query, "session")));
+            }
             default:
                 return Response.json(404, "{\"errore\":\"Endpoint sconosciuto\"}");
         }

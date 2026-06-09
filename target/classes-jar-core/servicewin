@@ -1,0 +1,41 @@
+<!--
+  Configurazione WinSW per eseguire il servizio come servizio Windows sempre attivo.
+  WinSW: https://github.com/winsw/winsw  (scarica WinSW-x64.exe)
+
+  Installazione:
+    1) mvn -U clean package   (genera target\cie-cns-wedge.jar)
+    2) crea una cartella, es. C:\identity-service\
+    3) copia dentro:
+         - WinSW-x64.exe  rinominato in  identity-service.exe
+         - questo file    rinominato in  identity-service.xml
+         - cie-cns-wedge.jar
+    4) adatta sotto il percorso di java.exe e le tre chiavi
+    5) da Prompt come Amministratore, nella cartella:
+         identity-service.exe install
+         identity-service.exe start
+    Il servizio parte da solo all'avvio di Windows (startmode Automatic) e si riavvia
+    in caso di crash. Gira in sessione 0: nessuna icona nel tray (modalita' headless),
+    ma gli endpoint HTTP su 127.0.0.1:8765 funzionano. Il servizio Smart Card di Windows
+    deve essere attivo (lo e' di default).
+
+  Disinstallazione:  identity-service.exe stop  &&  identity-service.exe uninstall
+-->
+<service>
+  <id>identity-service</id>
+  <name>Servizio Identita CIE/TS-CNS</name>
+  <description>Lettura identita da Tessera Sanitaria, CIE e tag NFC con API locale.</description>
+
+  <!-- ADATTA: percorso di java.exe (JDK 17+). -->
+  <executable>C:\Program Files\OpenLogic\jdk-22.0.2.9-hotspot\bin\java.exe</executable>
+
+  <!-- ADATTA: le tre chiavi (devono restare stabili). -->
+  <arguments>--add-modules java.smartcardio -Dapikey=CAMBIA_API_KEY -Dsignkey=CAMBIA_SIGN_KEY -Dcryptokey=CAMBIA_CRYPTO_KEY -Dport=8765 -jar "%BASE%\cie-cns-wedge.jar"</arguments>
+
+  <startmode>Automatic</startmode>
+  <onfailure action="restart" delay="5 sec"/>
+  <log mode="roll-by-size">
+    <sizeThreshold>10240</sizeThreshold>
+    <keepFiles>5</keepFiles>
+  </log>
+  <workingdirectory>%BASE%</workingdirectory>
+</service>

@@ -2,6 +2,7 @@ com/dadaops/cardreader/docs/us/UsaParser.class
 com/dadaops/cardreader/EmrtdReader.class
 com/dadaops/cardreader/ApiServer.class
 com/dadaops/cardreader/PcscCardSource.class
+com/dadaops/cardreader/IdentityMerge.class
 com/dadaops/cardreader/PcscCardLink.class
 com/dadaops/cardreader/Text.class
 com/dadaops/cardreader/ImageDecoder.class
@@ -13,6 +14,7 @@ com/dadaops/cardreader/docs/al/AlbaniaParser.class
 com/dadaops/cardreader/EmrtdReader$DatiMrz.class
 com/dadaops/cardreader/CardSource.class
 com/dadaops/cardreader/Detector.class
+com/dadaops/cardreader/IdentitySession$Voce.class
 com/dadaops/cardreader/StandaloneGui$CopyButtonColumn.class
 com/dadaops/cardreader/StandaloneGui$2.class
 com/dadaops/cardreader/DocumentBuilder.class
@@ -29,6 +31,7 @@ com/dadaops/cardreader/docs/DocumentParser.class
 com/dadaops/cardreader/ReaderInfo.class
 com/dadaops/cardreader/docs/it/ItaliaParser.class
 com/dadaops/cardreader/EmrtdReader$LogCattura.class
+com/dadaops/cardreader/IdentitySession.class
 com/dadaops/cardreader/EmrtdReader$CanException.class
 com/dadaops/cardreader/FiscalCode.class
 com/dadaops/cardreader/Apdu.class
