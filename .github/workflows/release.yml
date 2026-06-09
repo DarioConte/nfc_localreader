@@ -1,0 +1,107 @@
+name: Release jar autopartente
+
+# Costruisce un fat-jar con la configurazione (chiavi dai SECRET del repo) gia' inclusa,
+# cosi' parte con un semplice `java -jar ...jar` senza file esterni, e lo pubblica come
+# asset di una GitHub Release.
+#
+# ⚠️ SICUREZZA: le chiavi finiscono DENTRO il jar (un jar e' uno zip: chiunque lo scarichi
+#    puo' leggerle con `unzip -p ...jar identity.properties`). Usa SOLO con repo/release
+#    PRIVATI. Se il repo e' pubblico, NON inserire i secret: il jar genera chiavi a runtime.
+#
+# Secret usati (Settings -> Secrets and variables -> Actions):
+#   IDENTITY_APIKEY      (consigliato)   header X-API-Key
+#   IDENTITY_SIGNKEY     (consigliato)   checksum HMAC
+#   IDENTITY_CRYPTOKEY   (consigliato)   token pseudonimi (stabile e condivisa tra i tornelli)
+#   IDENTITY_ORIGIN      (opzionale)     CORS, default *
+#   IDENTITY_PORT        (opzionale)     default 8765
+#   IDENTITY_CONSOLE     (opzionale)     console di debug, default false (produzione)
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Versione/tag della release (es. v1.0.0)"
+        required: true
+        default: v0.0.0-test
+
+permissions:
+  contents: write   # necessario per creare la Release
+
+jobs:
+  build-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+
+      - name: Calcola versione
+        id: ver
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            echo "v=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          else
+            echo "v=${{ github.event.inputs.version }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Inietta configurazione dai secret (bundled nel jar)
+        env:
+          APIKEY: ${{ secrets.IDENTITY_APIKEY }}
+          SIGNKEY: ${{ secrets.IDENTITY_SIGNKEY }}
+          CRYPTOKEY: ${{ secrets.IDENTITY_CRYPTOKEY }}
+          PORT: ${{ secrets.IDENTITY_PORT }}
+          ORIGIN: ${{ secrets.IDENTITY_ORIGIN }}
+          CONSOLE: ${{ secrets.IDENTITY_CONSOLE }}
+        run: |
+          : "${PORT:=8765}"
+          : "${ORIGIN:=*}"
+          : "${CONSOLE:=false}"
+          {
+            echo "# Generato in CI dal workflow di release - NON modificare a mano."
+            echo "port=$PORT"
+            echo "origin=$ORIGIN"
+            [ -n "$APIKEY" ]    && echo "apikey=$APIKEY"
+            [ -n "$SIGNKEY" ]   && echo "signkey=$SIGNKEY"
+            [ -n "$CRYPTOKEY" ] && echo "cryptokey=$CRYPTOKEY"
+            echo "console.enabled=$CONSOLE"
+          } > src/main/resources/identity.properties
+          if [ -z "$APIKEY" ] || [ -z "$CRYPTOKEY" ]; then
+            echo "::warning::IDENTITY_APIKEY/IDENTITY_CRYPTOKEY non impostati: il jar genererà chiavi casuali a runtime (i token cambiano a ogni avvio)."
+          fi
+
+      - name: Build fat-jar
+        run: mvn -B -q clean package
+
+      - name: Prepara artefatti
+        id: art
+        run: |
+          JAR="cie-cns-wedge-${{ steps.ver.outputs.v }}.jar"
+          cp target/cie-cns-wedge.jar "$JAR"
+          sha256sum "$JAR" > "$JAR.sha256"
+          echo "jar=$JAR" >> "$GITHUB_OUTPUT"
+
+      - name: Pubblica la Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.ver.outputs.v }}
+          name: Identity ${{ steps.ver.outputs.v }}
+          files: |
+            ${{ steps.art.outputs.jar }}
+            ${{ steps.art.outputs.jar }}.sha256
+          body: |
+            **Jar autopartente** con configurazione inclusa.
+
+            Avvio (Windows e Linux, serve Java 17+):
+            ```
+            java -jar ${{ steps.art.outputs.jar }}
+            ```
+            Su JDK 9–17 aggiungi `--add-modules java.smartcardio`.
+
+            ⚠️ Se sono stati impostati i secret, questo jar **contiene le chiavi**: tienilo PRIVATO.

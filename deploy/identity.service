@@ -1,0 +1,27 @@
+# Servizio systemd per Linux/Raspberry.
+# Installazione:
+#   sudo apt install -y openjdk-17-jre-headless pcscd libccid
+#   sudo systemctl enable --now pcscd
+#   sudo mkdir -p /opt/identity
+#   sudo cp target/cie-cns-wedge.jar /opt/identity/
+#   sudo cp identity.properties      /opt/identity/      # con apikey/cryptokey/console.enabled
+#   sudo cp deploy/identity.service  /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now identity
+#   journalctl -u identity -f
+[Unit]
+Description=Servizio verifica identita' CIE/TS-CNS/Passaporto/EMV
+After=pcscd.service
+Wants=pcscd.service
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/identity
+# Legge /opt/identity/identity.properties (stessa cartella del jar). Niente argomenti extra.
+ExecStart=/usr/bin/java --add-modules java.smartcardio -jar /opt/identity/cie-cns-wedge.jar
+Restart=on-failure
+RestartSec=3
+# Headless: nessun system tray, gira in background.
+Environment=JAVA_TOOL_OPTIONS=-Djava.awt.headless=true
+
+[Install]
+WantedBy=multi-user.target

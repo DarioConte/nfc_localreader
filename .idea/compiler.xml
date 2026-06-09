@@ -12,7 +12,7 @@
   </component>
   <component name="JavacSettings">
     <option name="ADDITIONAL_OPTIONS_OVERRIDE">
-      <module name="cie-cns-wedge" options="--add-modules java.smartcardio" />
+      <module name="cie-cns-wedge" options="" />
     </option>
   </component>
 </project>

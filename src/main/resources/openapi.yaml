@@ -1,0 +1,305 @@
+openapi: 3.0.3
+info:
+  title: Servizio verifica identità CIE / TS-CNS / Passaporto / EMV
+  description: >
+    Servizio locale (127.0.0.1) che legge tramite NFC documenti d'identità elettronici
+    (CIE, TS-CNS, passaporto, carte d'identità estere biometriche come la CNIe francese),
+    carte di pagamento contactless (EMV) e tag NFC generici. Restituisce dati anagrafici in
+    JSON con uno schema uniforme, un checksum HMAC e un `tokenCarta` stabile per il riconoscimento.
+  version: "1.0.0"
+servers:
+  - url: http://127.0.0.1:8765
+    description: Istanza locale
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+  schemas:
+    Errore:
+      type: object
+      properties:
+        errore: { type: string }
+      example: { errore: "API key non valida" }
+
+    Health:
+      type: object
+      properties:
+        status: { type: string, example: UP }
+
+    Lettore:
+      type: object
+      properties:
+        index: { type: integer, example: 0 }
+        name: { type: string, example: "BIT4ID miniLector AIR" }
+        cardPresent: { type: boolean }
+    ReaderList:
+      type: object
+      properties:
+        readers:
+          type: array
+          items: { $ref: '#/components/schemas/Lettore' }
+
+    StatoLettore:
+      type: object
+      properties:
+        reader: { type: string, nullable: true }
+        cardPresent: { type: boolean }
+        tipo:
+          type: string
+          nullable: true
+          description: Tipo carta rilevato senza leggerne i dati
+          enum: [TS-CNS, CIE, "Carta di credito", NFC, sconosciuta, null]
+
+    CheckRequest:
+      type: object
+      description: >
+        Chiave di accesso secondo il documento. CIE/carta francese: `can`.
+        Passaporto/ID estero via MRZ: `documentNumber`+`dateOfBirth`+`dateOfExpiry`.
+        TS-CNS e carte EMV: nessuna chiave.
+      properties:
+        can:
+          type: string
+          description: CAN (6 cifre stampate sulla carta) per CIE / carta francese
+          example: "123456"
+        documentNumber:
+          type: string
+          description: Numero documento dalla MRZ (passaporto)
+        dateOfBirth:
+          type: string
+          description: Data di nascita, AAMMGG o AAAA-MM-GG
+        dateOfExpiry:
+          type: string
+          description: Data di scadenza, AAMMGG o AAAA-MM-GG
+        foto:
+          type: boolean
+          default: false
+          description: Se true legge anche la foto (DG2) e la firma (DG7)
+        debug:
+          type: boolean
+          default: false
+          description: Diagnostica (eMRTD/EMV); ignorato se la console è disabilitata
+        reader:
+          type: string
+          description: Selettore lettore (indice "0"/"1" o parte del nome); default il primo con carta
+
+    Documento:
+      type: object
+      description: >
+        Risposta uniforme. I campi compaiono solo se disponibili per quel documento.
+        I campi di luogo e `tipo` sono in MAIUSCOLO. `additionalProperties` è true perché
+        l'insieme dei campi varia per tipo documento.
+      additionalProperties: true
+      properties:
+        tipo:
+          type: string
+          description: CIE | TS-CNS | PASSAPORTO | "CARTA D'IDENTITA <PAESE>" | "Carta di credito" | NFC
+        cognome: { type: string }
+        nome: { type: string }
+        nomeCompleto: { type: string }
+        codiceFiscale: { type: string }
+        codiceFiscaleCertified:
+          type: boolean
+          description: true se letto dal documento (CIE/TS), false se calcolato (passaporto)
+        codiceFiscaleNota: { type: string }
+        sesso: { type: string, enum: [M, F] }
+        dataNascita: { type: string, format: date }
+        luogoNascita: { type: string }
+        comuneNascita: { type: string }
+        provinciaNascita: { type: string }
+        regione: { type: string }
+        statoNascita: { type: string }
+        natoEstero: { type: boolean }
+        codiceCatastale: { type: string, description: Codice Belfiore (de-omocodato) }
+        cittadinanza: { type: string }
+        numeroDocumento: { type: string }
+        statoEmissione: { type: string, description: ISO-3166 alpha-3 (es. ITA, FRA) }
+        tipoDocumento: { type: string }
+        dataScadenza: { type: string, format: date }
+        dataEmissione: { type: string, format: date }
+        autoritaEmittente: { type: string }
+        indirizzo: { type: string }
+        telefono: { type: string }
+        professione: { type: string }
+        chiaveAnagrafica: { type: string, description: HMAC pseudonimo del CF }
+        # --- immagini (solo con foto:true) ---
+        fotoBase64: { type: string, description: "data URL (PNG se convertibile)" }
+        fotoFormato: { type: string, enum: [png, originale] }
+        fotoMimeOriginale: { type: string }
+        fotoLarghezza: { type: string }
+        fotoAltezza: { type: string }
+        firmaBase64: { type: string, description: Firma autografa (DG7) come data URL }
+        # --- struttura/chip eMRTD ---
+        dataGroupPresenti: { type: string, example: "[1, 2, 11, 12, 14, 15]" }
+        versioneLDS: { type: string }
+        chipAuthentication: { type: boolean }
+        activeAuthentication: { type: boolean }
+        idChip: { type: string, description: Hash della chiave AA (DG15), stabile per chip }
+        idDocumento: { type: string, description: HMAC della firma SOD, stabile per documento }
+        algoritmoHashSOD: { type: string }
+        # --- carta di pagamento EMV ---
+        numeroCarta: { type: string, description: PAN in chiaro (perimetro PCI-DSS) }
+        scadenza: { type: string, example: "12/2028" }
+        circuito: { type: string, example: VISA }
+        aid: { type: string }
+        panSequence: { type: string }
+        titolare: { type: string }
+        ttqUsato: { type: string }
+        # --- identificatore uniforme per i tornelli ---
+        tokenCarta: { type: string, description: HMAC stabile pseudonimo per il riconoscimento }
+        tokenCartaFonte:
+          type: string
+          enum: [cf, pan, sod, chip, numeroDocumento, uid]
+        uidCasuale:
+          type: boolean
+          description: true se l'UID è casuale (token NON stabile)
+        uidCarta: { type: string }
+        # --- metadati/firma ---
+        letturaTimestamp: { type: string, format: date-time }
+        nonce: { type: string }
+        checksum: { type: string, description: HMAC-SHA256 di tutti i campi precedenti }
+        # --- esiti d'errore possibili ---
+        errore: { type: string }
+        canErrato: { type: boolean }
+        messaggio: { type: string }
+
+    IdentifyResponse:
+      type: object
+      properties:
+        tipo: { type: string, nullable: true }
+        tokenCarta:
+          type: string
+          nullable: true
+          description: null per eID senza CAN/MRZ o se nessuna fonte stabile
+        tokenCartaFonte: { type: string, enum: [cf, pan, uid] }
+        uidCasuale: { type: boolean }
+        avviso: { type: string }
+        richiedeAutenticazione:
+          type: boolean
+          description: true per CIE/passaporto (serve CAN/MRZ, non identificabili in preflight)
+      example:
+        tipo: "Carta di credito"
+        tokenCarta: "3bc35bde4f300c02fbcd29df5ea9ea04aa0a13ef571ebce95f1466412e2f5737"
+        tokenCartaFonte: pan
+
+    WriteRequest:
+      type: object
+      description: "Scrittura tag NFC: testo NDEF, oppure hex+page/block, oppure record tessera socio."
+      properties:
+        text: { type: string }
+        hex: { type: string }
+        page: { type: integer }
+        block: { type: integer }
+        key: { type: string }
+        chiaveAnagrafica: { type: string }
+        codiceSocio: { type: string }
+        codiceFamiliare: { type: string }
+        familiari: { type: string }
+        reader: { type: string }
+
+    VerifyRequest:
+      type: object
+      description: Tutti i campi della risposta da verificare, incluso checksum.
+      additionalProperties: true
+      required: [checksum]
+      properties:
+        checksum: { type: string }
+    VerifyResponse:
+      type: object
+      properties:
+        valido: { type: boolean }
+        nonceConosciuto: { type: boolean }
+        checksumAtteso: { type: string }
+
+paths:
+  /actuator/health:
+    get:
+      summary: Liveness
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/Health' } } }
+
+  /actuator/status:
+    get:
+      summary: Stato del lettore (senza leggere i dati)
+      parameters:
+        - { name: reader, in: query, required: false, schema: { type: string } }
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/StatoLettore' } } }
+
+  /actuator/readers:
+    get:
+      summary: Elenco lettori PC/SC collegati
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/ReaderList' } } }
+
+  /check:
+    post:
+      summary: Legge la carta e restituisce i dati
+      security: [ { ApiKeyAuth: [] } ]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CheckRequest' }
+            examples:
+              cie: { summary: CIE/carta francese, value: { can: "123456", foto: true } }
+              passaporto: { summary: Passaporto, value: { documentNumber: "YA1234567", dateOfBirth: "850314", dateOfExpiry: "300620", foto: true } }
+              tsCnsEmv: { summary: TS-CNS o carta EMV, value: {} }
+      responses:
+        '200':
+          description: Dati del documento (o errore applicativo nel corpo)
+          content: { application/json: { schema: { $ref: '#/components/schemas/Documento' } } }
+        '401':
+          description: API key non valida
+          content: { application/json: { schema: { $ref: '#/components/schemas/Errore' } } }
+
+  /identify:
+    get:
+      summary: Preflight tornello — solo tokenCarta, senza CAN/MRZ
+      security: [ { ApiKeyAuth: [] } ]
+      parameters:
+        - { name: reader, in: query, required: false, schema: { type: string } }
+        - { name: apikey, in: query, required: false, schema: { type: string }, description: alternativa all'header X-API-Key }
+      responses:
+        '200':
+          description: Identificazione (token assente per eID senza chiave)
+          content: { application/json: { schema: { $ref: '#/components/schemas/IdentifyResponse' } } }
+        '401':
+          description: API key non valida
+          content: { application/json: { schema: { $ref: '#/components/schemas/Errore' } } }
+
+  /write:
+    post:
+      summary: Scrive un tag NFC (testo / hex / tessera socio)
+      security: [ { ApiKeyAuth: [] } ]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/WriteRequest' } } }
+      responses:
+        '200': { description: Esito scrittura, content: { application/json: { schema: { type: object, additionalProperties: true } } } }
+        '401': { description: API key non valida, content: { application/json: { schema: { $ref: '#/components/schemas/Errore' } } } }
+
+  /verify:
+    post:
+      summary: Verifica il checksum HMAC di una risposta
+      security: [ { ApiKeyAuth: [] } ]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/VerifyRequest' } } }
+      responses:
+        '200': { description: Esito verifica, content: { application/json: { schema: { $ref: '#/components/schemas/VerifyResponse' } } } }
+        '401': { description: API key non valida, content: { application/json: { schema: { $ref: '#/components/schemas/Errore' } } } }
+
+  /openapi.yaml:
+    get:
+      summary: Questa specifica
+      responses:
+        '200': { description: OpenAPI, content: { application/yaml: { schema: { type: string } } } }

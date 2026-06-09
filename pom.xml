@@ -44,11 +44,44 @@
             <artifactId>bcprov-jdk18on</artifactId>
             <version>${bc.version}</version>
         </dependency>
+        <!-- Decoder JPEG 2000 per ImageIO: la foto del volto (DG2) di CIE e passaporto
+             e' tipicamente in image/jp2, non leggibile da Chrome/Firefox. Con questo
+             plugin (registrato via ServiceLoader) la convertiamo in PNG lato server. -->
+        <dependency>
+            <groupId>com.github.jai-imageio</groupId>
+            <artifactId>jai-imageio-jpeg2000</artifactId>
+            <version>1.4.0</version>
+        </dependency>
     </dependencies>
 
     <build>
         <finalName>cie-cns-wedge</finalName>
         <plugins>
+            <!-- Jar "core" (classifier: core) per l'inclusione in Android: SOLO le classi neutre,
+                 ESCLUSE quelle desktop (PC/SC, AWT/tray, httpserver, ImageIO). L'app Android aggiunge
+                 jmrtd + scuba-smartcards + bouncycastle e fornisce un CardSource su NFC IsoDep. -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>core-lib</id>
+                        <phase>package</phase>
+                        <goals><goal>jar</goal></goals>
+                        <configuration>
+                            <classifier>core</classifier>
+                            <excludes>
+                                <exclude>com/dadaops/cardreader/PcscCardSource*.class</exclude>
+                                <exclude>com/dadaops/cardreader/PcscCardLink*.class</exclude>
+                                <exclude>com/dadaops/cardreader/DesktopImageDecoder*.class</exclude>
+                                <exclude>com/dadaops/cardreader/ApiServer*.class</exclude>
+                                <exclude>com/dadaops/cardreader/TrayUi*.class</exclude>
+                                <exclude>com/dadaops/cardreader/IdentityServer*.class</exclude>
+                            </excludes>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
             <!-- Crea un fat-jar eseguibile con tutte le dipendenze incluse -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
@@ -59,11 +92,27 @@
                         <phase>package</phase>
                         <goals><goal>shade</goal></goals>
                         <configuration>
+                            <!-- BouncyCastle e' un jar firmato: dopo lo shade le firme non combaciano
+                                 piu' e ImageIO (ServiceLoader sul classpath) lancerebbe SecurityException.
+                                 Si rimuovono i file di firma dal fat-jar. -->
+                            <filters>
+                                <filter>
+                                    <artifact>*:*</artifact>
+                                    <excludes>
+                                        <exclude>META-INF/*.SF</exclude>
+                                        <exclude>META-INF/*.DSA</exclude>
+                                        <exclude>META-INF/*.RSA</exclude>
+                                    </excludes>
+                                </filter>
+                            </filters>
                             <transformers>
                                 <transformer
                                         implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
-                                    <mainClass>IdentityServer</mainClass>
+                                    <mainClass>com.dadaops.cardreader.IdentityServer</mainClass>
                                 </transformer>
+                                <!-- Mantiene la registrazione SPI di ImageIO (plugin JPEG 2000) nel fat-jar -->
+                                <transformer
+                                        implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
                             </transformers>
                         </configuration>
                     </execution>

@@ -8,6 +8,29 @@
     <finalName>cie-cns-wedge</finalName>
     <plugins>
       <plugin>
+        <artifactId>maven-jar-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>core-lib</id>
+            <phase>package</phase>
+            <goals>
+              <goal>jar</goal>
+            </goals>
+            <configuration>
+              <classifier>core</classifier>
+              <excludes>
+                <exclude>com/dadaops/cardreader/PcscCardSource*.class</exclude>
+                <exclude>com/dadaops/cardreader/PcscCardLink*.class</exclude>
+                <exclude>com/dadaops/cardreader/DesktopImageDecoder*.class</exclude>
+                <exclude>com/dadaops/cardreader/ApiServer*.class</exclude>
+                <exclude>com/dadaops/cardreader/TrayUi*.class</exclude>
+                <exclude>com/dadaops/cardreader/IdentityServer*.class</exclude>
+              </excludes>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+      <plugin>
         <artifactId>maven-shade-plugin</artifactId>
         <version>3.5.1</version>
         <executions>
@@ -17,10 +40,21 @@
               <goal>shade</goal>
             </goals>
             <configuration>
+              <filters>
+                <filter>
+                  <artifact>*:*</artifact>
+                  <excludes>
+                    <exclude>META-INF/*.SF</exclude>
+                    <exclude>META-INF/*.DSA</exclude>
+                    <exclude>META-INF/*.RSA</exclude>
+                  </excludes>
+                </filter>
+              </filters>
               <transformers>
                 <transformer>
-                  <mainClass>IdentityServer</mainClass>
+                  <mainClass>com.dadaops.cardreader.IdentityServer</mainClass>
                 </transformer>
+                <transformer />
               </transformers>
             </configuration>
           </execution>
@@ -31,8 +65,8 @@
   <properties>
     <maven.compiler.release>17</maven.compiler.release>
     <jmrtd.version>0.7.42</jmrtd.version>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     <bc.version>1.78.1</bc.version>
     <scuba.version>0.0.20</scuba.version>
-    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
   </properties>
 </project>

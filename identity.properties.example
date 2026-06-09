@@ -1,0 +1,14 @@
+# Copia questo file come "identity.properties" ACCANTO al jar (o indicane il path con -Dconfig=...).
+# Sovrascrive i default bundled nel jar. In produzione imposta almeno apikey/signkey/cryptokey.
+
+port=8765
+origin=*
+
+# Chiavi stabili e CONDIVISE tra tutte le istanze/tornelli (genera valori casuali tuoi):
+#   python -c "import secrets; print(secrets.token_urlsafe(48))"
+apikey=09a6181f2a794dabbbc5420f2b0187c5
+signkey=1bae865493e844ae8add6ed5c27e2e65
+cryptokey=c44155080a954fc890a4c5f0234886ea
+
+# In produzione disattiva la console di test e i dump di debug:
+console.enabled=false
