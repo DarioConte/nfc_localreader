@@ -20,6 +20,16 @@ public final class IdentityServer {
         Security.addProvider(new BouncyCastleProvider());
         AppContext.init();
         Platform.configure(new PcscCardSource(), new DesktopImageDecoder());
+
+        // Modalità: "server" (default) | "gui"/"standalone". Es: java -jar cie-cns-wedge.jar gui
+        String modo = (args.length > 0 ? args[0] : System.getProperty("mode", "server"))
+                .toLowerCase().replaceFirst("^--", "");
+        if (modo.equals("gui") || modo.equals("standalone")) {
+            System.out.println("Avvio in modalità GUI standalone.");
+            StandaloneGui.launch();
+            return;
+        }
+
         ApiServer.start();
 
         System.out.println("Servizio identita' avviato su http://localhost:" + AppContext.PORT);

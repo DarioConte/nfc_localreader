@@ -12,8 +12,8 @@ final class Json {
     private Json() {}
 
     /** Campi emessi come booleani veri (non tra virgolette). Valore interno "true"/"false". */
-    static final Set<String> BOOL_KEYS = Set.of("codiceFiscaleCertified", "natoEstero",
-            "chipAuthentication", "activeAuthentication", "uidCasuale");
+    static final Set<String> BOOL_KEYS = Set.of("codiceFiscaleCertified", "codiceFiscaleDaVerificare",
+            "natoEstero", "chipAuthentication", "activeAuthentication", "uidCasuale", "unioneEuropea", "nomiTraslitterati");
 
     static String jstr(String s) {
         if (s == null) return "null";
@@ -72,7 +72,9 @@ final class Json {
     static LinkedHashMap<String, String> parseFlatJsonOrdered(String body) {
         LinkedHashMap<String, String> m = new LinkedHashMap<>();
         if (body == null) return m;
-        Matcher mm = Pattern.compile("\"([^\"]+)\"\\s*:\\s*(?:\"((?:\\\\.|[^\"\\\\])*)\"|(true|false))").matcher(body);
+        // "unrolled loop": il valore stringa usa [^"\]* iterativo (NON (?:..|..)* ricorsivo),
+        // altrimenti su valori lunghi (es. fotoBase64) il regex engine va in StackOverflow.
+        Matcher mm = Pattern.compile("\"([^\"]+)\"\\s*:\\s*(?:\"([^\"\\\\]*(?:\\\\.[^\"\\\\]*)*)\"|(true|false))").matcher(body);
         while (mm.find())
             m.put(mm.group(1), mm.group(2) != null ? unescapeJson(mm.group(2)) : mm.group(3));
         return m;

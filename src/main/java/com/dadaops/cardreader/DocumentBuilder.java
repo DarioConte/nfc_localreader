@@ -23,16 +23,11 @@ final class DocumentBuilder {
     private DocumentBuilder() {}
 
     /**
-     * Classifica il documento eMRTD dalla MRZ: passaporto (tipo "P"), CIE (carta italiana) o
-     * carta d'identità estera (es. francese -> "CARTA D'IDENTITA FRA"). Fallback se la MRZ manca.
+     * Classifica il documento eMRTD e lo arricchisce con paese/UE/categoria + campi specifici del
+     * paese (vedi {@link com.dadaops.cardreader.docs.DocumentRegistry} e i parser per paese).
      */
     static String classificaTipo(Map<String, String> dati, String fallback) {
-        String dt = dati.getOrDefault("tipoDocumento", "");
-        String paese = dati.getOrDefault("statoEmissione", "");
-        if (dt.startsWith("P")) return "PASSAPORTO";
-        if ("ITA".equals(paese)) return "CIE";
-        if (!paese.isBlank()) return "CARTA D'IDENTITA " + paese;
-        return fallback;
+        return com.dadaops.cardreader.docs.DocumentRegistry.classifica(dati, fallback);
     }
 
     /** Schema uniforme: tipo, campi canonici, campi specifici, token, metadati e checksum HMAC. */
@@ -60,7 +55,7 @@ final class DocumentBuilder {
         for (Map.Entry<String, String> e : dati.entrySet())
             if (!out.containsKey(e.getKey())) out.put(e.getKey(), e.getValue()); // campi specifici
 
-        for (String k : new String[]{"tipo", "luogoNascita", "comuneNascita", "provinciaNascita", "regione", "statoNascita"})
+        for (String k : new String[]{"tipo", "luogoNascita", "comuneNascita", "provinciaNascita", "regione", "statoNascita", "paese"})
             if (out.containsKey(k) && out.get(k) != null) out.put(k, out.get(k).toUpperCase());
 
         aggiungiTokenCarta(out);
@@ -88,9 +83,12 @@ final class DocumentBuilder {
         if (cat == null) return;
         String calc = calcolaCodiceFiscale(cognome, nome, nascita, sesso, cat);
         if (calc == null) return;
-        out.put("codiceFiscale", calc);
+        out.put("codiceFiscale", calc);                 // pronto da inserire in una form
+        out.put("codiceFiscaleCalcolato", calc);        // nome esplicito: valore calcolato (fittizio)
         out.put("codiceFiscaleCertified", "false");
-        out.put("codiceFiscaleNota", "stima calcolata dai dati del documento (il CF non e' memorizzato sul passaporto); non risolve l'omocodia");
+        out.put("codiceFiscaleDaVerificare", "true");
+        out.put("codiceFiscaleNota", "Codice fiscale CALCOLATO dai dati del documento (non presente sul passaporto): "
+                + "DA VERIFICARE (es. leggendo poi la Tessera Sanitaria). Non risolve l'omocodia.");
         out.put("codiceCatastale", cat);
         risolviLuogoNascita(out, cat);
     }

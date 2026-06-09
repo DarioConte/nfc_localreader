@@ -11,7 +11,8 @@ import static com.dadaops.cardreader.Json.jstr;
 final class Detector {
     private Detector() {}
 
-    enum Tipo { TS_CNS, CIE, EMV, NFC, SCONOSCIUTA }
+    // EID = famiglia eMRTD (CIE, passaporto, carta d'identità estera): indistinguibili pre-auth.
+    enum Tipo { TS_CNS, EID, EMV, NFC, SCONOSCIUTA }
 
     /** Esito del rilevamento: tipo carta e UID NFC se disponibile (solo contactless). */
     static final class Rilevazione {
@@ -28,7 +29,7 @@ final class Detector {
             if (select(link, (byte) 0x3F, (byte) 0x00)
                     && select(link, (byte) 0x11, (byte) 0x00)
                     && select(link, (byte) 0x11, (byte) 0x02)) tipo = Tipo.TS_CNS;
-            else if (selectAid(link, AppContext.AID_EMRTD)) tipo = Tipo.CIE;
+            else if (selectAid(link, AppContext.AID_EMRTD)) tipo = Tipo.EID;
             else if (EmvReader.emvSelect(link, AppContext.PPSE) != null) tipo = Tipo.EMV;
             else if (u != null) tipo = Tipo.NFC;
             else tipo = Tipo.SCONOSCIUTA;
@@ -62,7 +63,7 @@ final class Detector {
     static String tipoString(Tipo t) {
         switch (t) {
             case TS_CNS: return "TS-CNS";
-            case CIE: return "CIE";
+            case EID: return "Documento elettronico";
             case EMV: return "Carta di credito";
             case NFC: return "NFC";
             default: return "sconosciuta";

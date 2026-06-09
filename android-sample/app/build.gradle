@@ -1,0 +1,41 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.dadaops.cardreader.android'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'com.dadaops.cardreader.android'
+        minSdk 21          // IsoDep + enableReaderMode + isExtendedLengthApduSupported
+        targetSdk 34
+        versionCode 1
+        versionName '1.0'
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    // jMRTD/BouncyCastle portano alcune risorse META-INF duplicate: ignorale.
+    packaging {
+        resources {
+            excludes += ['META-INF/*.SF', 'META-INF/*.DSA', 'META-INF/*.RSA', 'META-INF/versions/**']
+        }
+    }
+}
+
+dependencies {
+    // Il jar "core" prodotto dalla build Maven: copialo in app/libs/cie-cns-wedge-core.jar
+    implementation files('libs/cie-cns-wedge-core.jar')
+
+    // Lettura eMRTD (PACE/BAC) — versioni Android-compatibili:
+    implementation 'org.jmrtd:jmrtd:0.7.42'
+    implementation 'net.sf.scuba:scuba-smartcards:0.0.20'      // NON la variante "-j2se" (desktop)
+    implementation 'org.bouncycastle:bcprov-jdk15to18:1.78.1'  // provider completo per PACE
+
+    // Server HTTP locale
+    implementation 'org.nanohttpd:nanohttpd:2.3.1'
+}

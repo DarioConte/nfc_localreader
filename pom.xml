@@ -52,6 +52,12 @@
             <artifactId>jai-imageio-jpeg2000</artifactId>
             <version>1.4.0</version>
         </dependency>
+        <!-- Look & Feel moderno per la GUI standalone (solo desktop). -->
+        <dependency>
+            <groupId>com.formdev</groupId>
+            <artifactId>flatlaf</artifactId>
+            <version>3.5.4</version>
+        </dependency>
     </dependencies>
 
     <build>
@@ -76,6 +82,7 @@
                                 <exclude>com/dadaops/cardreader/DesktopImageDecoder*.class</exclude>
                                 <exclude>com/dadaops/cardreader/ApiServer*.class</exclude>
                                 <exclude>com/dadaops/cardreader/TrayUi*.class</exclude>
+                                <exclude>com/dadaops/cardreader/StandaloneGui*.class</exclude>
                                 <exclude>com/dadaops/cardreader/IdentityServer*.class</exclude>
                             </excludes>
                         </configuration>

@@ -45,6 +45,9 @@ public final class ApiRouter {
                 return Response.json(200, CardReaderApi.status(queryParam(query, "reader")));
             case "/openapi.yaml":
                 return resource("/openapi.yaml", "application/yaml; charset=utf-8");
+            case "/docs":
+            case "/docs/":
+                return resource("/docs.html", "text/html; charset=utf-8");   // Swagger UI (carica /openapi.yaml)
             case "/":
             case "/console.html":
                 if (!AppContext.CONSOLE_ENABLED) return Response.json(403, "{\"errore\":\"Console di debug disabilitata\"}");

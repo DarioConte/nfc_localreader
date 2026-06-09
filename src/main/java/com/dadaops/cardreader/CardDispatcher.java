@@ -60,17 +60,42 @@ final class CardDispatcher {
         try { r = rileva(link); } finally { link.disconnect(true); }   // reset, pulito per PACE
         Tipo tipo = r.tipo;
         String uid = r.uid;
+        boolean hasCan = can != null && !can.isBlank();
 
+        // Il TIPO RILEVATO comanda: CAN/MRZ sono usati solo se la carta è davvero un documento
+        // elettronico (eID). Su TS-CNS/EMV/NFC le chiavi vengono ignorate (non si legge "sbagliato").
         if (tipo == Tipo.TS_CNS) {
             try (CardLink l = src.connect(reader)) {
                 Map<String, String> dati = leggiTsCns(l);
                 if (dati == null) return "{\"errore\":\"Dati personali non selezionabili\"}";
                 if (uid != null) dati.put("uidCarta", uid);
+                if (hasCan || mrz != null) dati.put("avvisoChiave", "Rilevata TS-CNS: CAN/MRZ non applicabili e ignorati");
                 return finalizzaJson("TS-CNS", dati);
             }
-        } else if (tipo == Tipo.CIE) {
+        } else if (tipo == Tipo.EID) {
             if (debug) return diagnosticaEmrtd(reader, can, mrz, uid);
-            if ((can == null || can.isBlank()) && mrz != null) {
+            if (!hasCan && mrz == null)
+                return "{\"tipo\":\"Documento elettronico\",\"errore\":\"Documento elettronico rilevato: serve il CAN "
+                        + "(CIE/carta d'identità) oppure i dati MRZ (documentNumber, dateOfBirth, dateOfExpiry) del passaporto\"}";
+
+            // Si tenta la chiave fornita; CIE e passaporto sono indistinguibili pre-auth, quindi se
+            // c'è il CAN si prova quello (eventuale retry su errore di stato), poi si ripiega sulla MRZ.
+            CanException canErr = null;
+            if (hasCan) {
+                for (int tentativo = 0; tentativo < 2; tentativo++) {
+                    try {
+                        Map<String, String> dati = leggiCie(reader, can.trim(), includiFoto);
+                        if (uid != null) dati.put("uidCarta", uid);
+                        return finalizzaJson(classificaTipo(dati, "CIE"), dati);
+                    } catch (CanException ce) {
+                        canErr = ce; break;     // il CAN non apre il documento: provo la MRZ se disponibile
+                    } catch (Exception e) {
+                        if (tentativo == 1) { if (mrz == null) return "{\"tipo\":\"Documento elettronico\",\"errore\":" + jstr("Lettura fallita: " + e.getMessage()) + "}"; break; }
+                        try { Thread.sleep(150); } catch (InterruptedException ignored) {}
+                    }
+                }
+            }
+            if (mrz != null) {
                 try {
                     Map<String, String> dati = leggiPassaporto(reader, mrz, includiFoto);
                     if (uid != null) dati.put("uidCarta", uid);
@@ -80,29 +105,9 @@ final class CardDispatcher {
                             + jstr("Lettura fallita (verifica numero documento/date MRZ): " + e.getMessage()) + "}";
                 }
             }
-            if (can == null || can.isBlank())
-                return "{\"tipo\":\"eMRTD\",\"errore\":\"Serve il CAN (CIE) o i dati MRZ "
-                        + "(documentNumber, dateOfBirth, dateOfExpiry) per il passaporto\"}";
-            try {
-                Map<String, String> dati = leggiCie(reader, can.trim(), includiFoto);
-                if (uid != null) dati.put("uidCarta", uid);
-                return finalizzaJson(classificaTipo(dati, "CIE"), dati);
-            } catch (CanException ce) {
-                return "{\"tipo\":\"CIE\",\"canErrato\":true,\"messaggio\":\"Codice CAN Errato\",\"errore\":"
-                        + jstr(ce.getMessage()) + "}";
-            } catch (Exception e) {
-                try {
-                    Thread.sleep(150);
-                    Map<String, String> dati = leggiCie(reader, can.trim(), includiFoto);
-                    if (uid != null) dati.put("uidCarta", uid);
-                    return finalizzaJson("CIE", dati);
-                } catch (CanException ce2) {
-                    return "{\"tipo\":\"CIE\",\"canErrato\":true,\"messaggio\":\"Codice CAN Errato\",\"errore\":"
-                            + jstr(ce2.getMessage()) + "}";
-                } catch (Exception e2) {
-                    return "{\"tipo\":\"CIE\",\"errore\":" + jstr("Lettura fallita: " + e2.getMessage()) + "}";
-                }
-            }
+            return "{\"tipo\":\"Documento elettronico\",\"canErrato\":true,\"messaggio\":\"Codice CAN errato\","
+                    + "\"suggerimento\":\"Se il documento è un passaporto/eID estero usa i dati MRZ invece del CAN\",\"errore\":"
+                    + jstr(canErr != null ? canErr.getMessage() : "CAN non valido per questo documento") + "}";
         } else if (tipo == Tipo.EMV) {
             try (CardLink l = src.connect(reader)) { return leggiCartaCredito(l, uid, debug); }
         } else if (tipo == Tipo.NFC) {
@@ -143,7 +148,7 @@ final class CardDispatcher {
                 }
             } else if (r.tipo == Tipo.NFC && r.uid != null) {
                 token = tokenCarta("uid", r.uid); fonte = "uid";
-            } else if (r.tipo == Tipo.CIE) {
+            } else if (r.tipo == Tipo.EID) {
                 return "{\"tipo\":" + jstr(tipoStr) + ",\"tokenCarta\":null,\"richiedeAutenticazione\":true,"
                         + "\"messaggio\":\"Documento eID: serve CAN (CIE) o dati MRZ (passaporto), non identificabile in preflight\"}";
             }

@@ -105,6 +105,22 @@ Enrollment: leggi una volta, salva `tokenCarta`; agli accessi successivi confron
 riletto. Richiede una `CRYPTO_KEY` **stabile** in produzione (altrimenti i token cambiano a ogni
 riavvio). Per le carte di pagamento basta il `tokenCarta` senza conservare il PAN.
 
+### Documenti d'identità per paese (parser in `docs/`)
+
+Tutti i documenti **ICAO eMRTD** sono leggibili: passaporti e carte d'identità di **USA, Russia,
+Ucraina, Albania, tutta l'UE** e altri (DG1 MRZ + DG11 sono standard ICAO). Il package
+**`com.dadaops.cardreader.docs`** identifica il documento e applica un parser per paese:
+
+- **`Countries`** — ISO 3166-1 alpha-3 → nome Stato in italiano (`paesi.csv`) + appartenenza UE.
+- **`DocumentRegistry`** — dalla MRZ ricava `tipo`, **`paese`**, **`unioneEuropea`**, `categoriaDocumento`.
+- Parser per paese in sotto-package: `docs.it` (Italia/CF), `docs.ro` (**Romania**: decodifica il
+  **CNP** → sesso + data di nascita), `docs.ua` (Ucraina, RNTRC), `docs.ru` (Russia), `docs.us` (USA),
+  `docs.al` (Albania, NID), e **`docs.world.GenericParser`** per tutti gli altri.
+
+Esempio: un passaporto russo esce come `tipo: "PASSAPORTO"`, `paese: "FEDERAZIONE RUSSA"`,
+`unioneEuropea: false`, `nomiTraslitterati: true`; una carta rumena come `paese: "ROMANIA"`,
+`unioneEuropea: true`, `cnp`, `sesso`, `dataNascita`.
+
 ### Carte di pagamento contactless (EMV)
 
 Le carte di credito/debito contactless vengono riconosciute (`tipo: "Carta di credito"`) e lette
@@ -155,9 +171,12 @@ lato server (plugin `jai-imageio-jpeg2000`) e restituisce un data URL pronto per
 
 ## API / OpenAPI
 
-Il contratto completo per il frontend è in [`openapi.yaml`](src/main/resources/openapi.yaml) ed è
-servito a runtime su **`GET /openapi.yaml`** (senza auth). Importalo in Swagger UI / Postman o usa
-un generatore di client per implementare le chiamate dal gestionale.
+Il contratto completo per il frontend è in [`openapi.yaml`](src/main/resources/openapi.yaml):
+
+- **`GET /docs`** → **Swagger UI** già pronta nel browser (carica lo spec via CDN).
+- **`GET /openapi.yaml`** → lo spec grezzo (per Postman o un generatore di client).
+
+Entrambi senza auth. Esempio: `http://localhost:8765/docs`.
 
 ## Configurazione
 
@@ -260,15 +279,21 @@ un'altra implementazione del trasporto.
 mvn -U clean package        # -> target/cie-cns-wedge.jar (fat-jar)
 ```
 
-## Avvio (Windows e Linux)
+## Avvio — tre modalità
 
-Avvio facile, senza argomenti (legge `identity.properties` accanto al jar se presente):
+Lo stesso jar fa tre cose, scelte da un parametro:
 
 ```bash
-java -jar cie-cns-wedge.jar          # JDK moderni
-./run.sh                             # Linux/macOS  (aggiunge --add-modules per JDK più vecchi)
-run.bat                              # Windows
+java -jar cie-cns-wedge.jar            # 1) SERVER REST (default) su 127.0.0.1:8765
+java -jar cie-cns-wedge.jar gui        # 2) GUI STANDALONE: finestra che legge e mostra tutti i
+                                       #    campi in tabella, con copia-incolla (TSV/JSON/token)
+./run.sh   / run.bat                   # script (Linux/macOS / Windows), accettano lo stesso parametro
 ```
+
+3) **Libreria** per Android (jar `cie-cns-wedge-core.jar`) — vedi sezione Android sopra.
+
+La GUI riusa la stessa logica del server (`CardReaderApi`): legge la carta, mostra i campi in una
+tabella selezionabile (Ctrl+C o "Copia tabella TSV"), il JSON grezzo e la foto, più "Copia tokenCarta".
 
 Su JDK 9–17 può servire `--add-modules java.smartcardio` (già incluso in `run.sh`/`run.bat`). Su
 Linux servono `pcscd` + `libccid` attivi; su Windows il servizio Smart Card è già presente.

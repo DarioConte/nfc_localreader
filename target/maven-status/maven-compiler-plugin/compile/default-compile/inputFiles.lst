@@ -1,4 +1,3 @@
-/Users/dario/Development/nfc_localreader/src/main/java/CardWedgeFull.java
 /Users/dario/Development/nfc_localreader/src/main/java/com/dadaops/cardreader/Apdu.java
 /Users/dario/Development/nfc_localreader/src/main/java/com/dadaops/cardreader/ApiRouter.java
 /Users/dario/Development/nfc_localreader/src/main/java/com/dadaops/cardreader/ApiServer.java
@@ -26,7 +25,19 @@
 /Users/dario/Development/nfc_localreader/src/main/java/com/dadaops/cardreader/Platform.java
 /Users/dario/Development/nfc_localreader/src/main/java/com/dadaops/cardreader/ReaderInfo.java
 /Users/dario/Development/nfc_localreader/src/main/java/com/dadaops/cardreader/Signer.java
+/Users/dario/Development/nfc_localreader/src/main/java/com/dadaops/cardreader/StandaloneGui.java
 /Users/dario/Development/nfc_localreader/src/main/java/com/dadaops/cardreader/Territory.java
 /Users/dario/Development/nfc_localreader/src/main/java/com/dadaops/cardreader/Text.java
 /Users/dario/Development/nfc_localreader/src/main/java/com/dadaops/cardreader/TrayUi.java
 /Users/dario/Development/nfc_localreader/src/main/java/com/dadaops/cardreader/TsCnsReader.java
+/Users/dario/Development/nfc_localreader/src/main/java/com/dadaops/cardreader/docs/Countries.java
+/Users/dario/Development/nfc_localreader/src/main/java/com/dadaops/cardreader/docs/DocumentParser.java
+/Users/dario/Development/nfc_localreader/src/main/java/com/dadaops/cardreader/docs/DocumentProfile.java
+/Users/dario/Development/nfc_localreader/src/main/java/com/dadaops/cardreader/docs/DocumentRegistry.java
+/Users/dario/Development/nfc_localreader/src/main/java/com/dadaops/cardreader/docs/al/AlbaniaParser.java
+/Users/dario/Development/nfc_localreader/src/main/java/com/dadaops/cardreader/docs/it/ItaliaParser.java
+/Users/dario/Development/nfc_localreader/src/main/java/com/dadaops/cardreader/docs/ro/RomaniaParser.java
+/Users/dario/Development/nfc_localreader/src/main/java/com/dadaops/cardreader/docs/ru/RussiaParser.java
+/Users/dario/Development/nfc_localreader/src/main/java/com/dadaops/cardreader/docs/ua/UcrainaParser.java
+/Users/dario/Development/nfc_localreader/src/main/java/com/dadaops/cardreader/docs/us/UsaParser.java
+/Users/dario/Development/nfc_localreader/src/main/java/com/dadaops/cardreader/docs/world/GenericParser.java
