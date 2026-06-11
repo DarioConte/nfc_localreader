@@ -241,11 +241,13 @@ final class StandaloneGui {
         JButton copiaJson = button("Copia JSON");
         JButton copiaToken = button("Copia token carta");
         JButton wizard = button("Identifica (2 documenti)");
+        JButton scriviTag = button("Scrivi tag…");
+        JButton clonaTag = button("Clona tag");
         JLabel stato = new JLabel(" ");
         stato.setForeground(MUTED);
         JPanel bottom = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 4));
         bottom.setOpaque(false);
-        bottom.add(copiaTsv); bottom.add(copiaJson); bottom.add(copiaToken); bottom.add(wizard);
+        bottom.add(copiaTsv); bottom.add(copiaJson); bottom.add(copiaToken); bottom.add(wizard); bottom.add(scriviTag); bottom.add(clonaTag);
         bottom.add(Box.createHorizontalStrut(16)); bottom.add(stato);
 
         root.add(north, BorderLayout.NORTH);
@@ -278,6 +280,8 @@ final class StandaloneGui {
             copia(tk == null ? "" : tk); stato.setText(tk == null ? "Nessun token carta." : "Token carta copiato."); });
         salvaFoto.addActionListener(e -> salvaFoto(f, stato));
         wizard.addActionListener(e -> apriWizard(f, model, photo, salvaFoto, stato));
+        scriviTag.addActionListener(e -> apriScrittura(f, stato));
+        clonaTag.addActionListener(e -> apriClonazione(f, stato));
 
         Timer timer = new Timer(1200, null);
         timer.addActionListener(ev -> {
@@ -485,6 +489,203 @@ final class StandaloneGui {
         dlg.setLocationRelativeTo(parent);
         dialogoAperto = true;
         try { dlg.setVisible(true); } finally { dialogoAperto = false; }
+    }
+
+    /**
+     * Popup di scrittura grezza: scrive byte esadecimali su una pagina del tag NFC (NTAG/Ultralight),
+     * 4 byte per pagina. Usa la stessa API del server ({@link CardReaderApi#write}, modalità raw-page).
+     */
+    private static void apriScrittura(JFrame parent, JLabel statoMain) {
+        JDialog dlg = new JDialog(parent, "Scrivi tag — pagina grezza (hex)", true);
+
+        JTextField pageF = new JTextField("4", 4);
+        JTextField hexF = new JTextField(28);
+        JLabel esito = etic("Pronto. Appoggia il tag sul lettore e premi Scrivi.");
+        JButton scrivi = primario("Scrivi");
+        JButton chiudi = new JButton("Chiudi");
+
+        scrivi.addActionListener(e -> {
+            Integer page = parsePage(pageF.getText());
+            if (page == null) { esito.setText("Pagina non valida: usa un intero >= 0."); return; }
+            String hex = hexF.getText().replaceAll("\\s", "");
+            if (hex.isEmpty() || !hex.matches("(?i)[0-9a-f]+") || hex.length() % 2 != 0) {
+                esito.setText("Hex non valido: coppie esadecimali (es. DEADBEEF)."); return;
+            }
+            if (page < 4 && JOptionPane.showConfirmDialog(dlg,
+                    "Le pagine 0-3 contengono UID, lock bytes e Capability Container.\n"
+                  + "Scriverle può rendere il tag inutilizzabile in modo irreversibile.\nContinuare?",
+                    "Attenzione", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE) != JOptionPane.YES_OPTION)
+                return;
+            scrivi.setEnabled(false); esito.setText("Scrittura in corso…");
+            final int p = page;
+            new Thread(() -> {
+                String resp = CardReaderApi.write(null, null, hex, p, null, null, null, null, null, null);
+                Map<String, String> m = Json.parseFlatJsonOrdered(resp);
+                SwingUtilities.invokeLater(() -> {
+                    scrivi.setEnabled(true);
+                    String msg = m.containsKey("errore")
+                            ? "Errore: " + m.get("errore")
+                            : "Scritto: " + m.getOrDefault("byteScritti", "?") + " byte da pagina " + m.getOrDefault("page", "?") + ".";
+                    esito.setText(msg);
+                    if (statoMain != null) statoMain.setText(msg);
+                });
+            }, "write").start();
+        });
+        chiudi.addActionListener(e -> dlg.dispose());
+
+        JPanel content = colonna(
+                titoloDlg("Scrittura grezza su tag NFC"),
+                etic("Scrive i byte hex dalla pagina indicata (4 byte/pagina; l'ultima viene riempita a multiplo di 4)."),
+                affianca(new JLabel("Pagina:"), pageF, new JLabel("  Hex:"), hexF),
+                Box.createVerticalStrut(8),
+                affianca(chiudi, scrivi),
+                Box.createVerticalStrut(6),
+                esito);
+        content.setBorder(new EmptyBorder(18, 20, 18, 20));
+        dlg.setContentPane(content);
+        dlg.pack();
+        dlg.setMinimumSize(new Dimension(520, dlg.getHeight()));
+        dlg.setLocationRelativeTo(parent);
+        dialogoAperto = true;
+        try { dlg.setVisible(true); } finally { dialogoAperto = false; }
+    }
+
+    private static Integer parsePage(String s) {
+        try { int p = Integer.parseInt(s.trim()); return p >= 0 ? p : null; }
+        catch (Exception e) { return null; }
+    }
+
+    /**
+     * Clonazione tag NFC (NTAG/Ultralight): legge la memoria del tag di ORIGINE, ne estrae l'area
+     * dati utente (da pagina 4, limitata alla capacità dichiarata nel Capability Container) e la
+     * riscrive sul tag di DESTINAZIONE. L'UID NON viene clonato: è fissato in fabbrica e non
+     * riscrivibile su un NTAG standard, quindi il token basato su UID resterà diverso.
+     */
+    private static void apriClonazione(JFrame parent, JLabel statoMain) {
+        JDialog dlg = new JDialog(parent, "Clona tag NFC", true);
+        final String[] userHex = {null}, uidBlock = {null};
+
+        JButton leggiOrig = primario("1) Leggi origine");
+        JLabel s1 = etic("Appoggia il tag da copiare e premi Leggi origine.");
+        JCheckBox cloneUid = new JCheckBox("Clona anche l'UID (richiede tag \"magic\" riscrivibile)");
+        cloneUid.setOpaque(false);
+        JButton scriviDest = primario("2) Scrivi su destinazione");
+        scriviDest.setEnabled(false);                 // sbloccato solo dopo una lettura valida
+        JLabel s2 = etic("Prima leggi il tag di origine.");
+        JButton chiudi = new JButton("Chiudi");
+
+        leggiOrig.addActionListener(e -> {
+            s1.setText("lettura…"); leggiOrig.setEnabled(false); scriviDest.setEnabled(false);
+            new Thread(() -> {
+                String resp = CardReaderApi.check(null, null, false, null, null, null, false);
+                Map<String, String> m = Json.parseFlatJsonOrdered(resp);
+                String fam = m.get("famiglia");
+                String user = estraiUtente(m.get("memoriaHex"));
+                SwingUtilities.invokeLater(() -> {
+                    leggiOrig.setEnabled(true);
+                    if (m.containsKey("errore")) { s1.setText("errore: " + m.get("errore")); return; }
+                    if (fam == null || !fam.startsWith("NTAG") || user == null) {
+                        userHex[0] = null; uidBlock[0] = null;
+                        s1.setText("non clonabile: serve un tag NTAG/Ultralight (no MIFARE Classic).");
+                        return;
+                    }
+                    userHex[0] = user;
+                    uidBlock[0] = estraiUidBlock(m.get("memoriaHex"));   // pagine 0-3: UID + BCC + lock + CC
+                    s1.setText("letto: UID " + m.getOrDefault("uid", "?") + " — " + (user.length() / 2) + " byte dati.");
+                    s2.setText("pronto: appoggia il tag di destinazione (vuoto) e premi Scrivi.");
+                    scriviDest.setEnabled(true);
+                });
+            }, "clone-read").start();
+        });
+
+        scriviDest.addActionListener(e -> {
+            if (userHex[0] == null) return;
+            boolean withUid = cloneUid.isSelected() && uidBlock[0] != null;
+            // I lock bytes statici (pagina 2, ultimi 2 byte) vengono copiati: se non sono 0000 il tag di
+            // destinazione potrebbe restare bloccato in modo irreversibile -> conferma esplicita.
+            if (withUid) {
+                String lock = uidBlock[0].length() >= 24 ? uidBlock[0].substring(20, 24) : "0000";
+                if (!lock.equalsIgnoreCase("0000") && JOptionPane.showConfirmDialog(dlg,
+                        "L'origine ha lock bytes attivi (" + lock + "): clonando l'UID verranno copiati\n"
+                      + "e il tag di destinazione potrebbe diventare permanentemente in sola lettura.\nContinuare?",
+                        "Attenzione", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE) != JOptionPane.YES_OPTION)
+                    return;
+            }
+            s2.setText("scrittura…"); scriviDest.setEnabled(false);
+            final boolean uid = withUid;
+            new Thread(() -> {
+                // Prima i dati (pagina 4+), poi l'eventuale UID (pagine 0-3): se il write dell'UID
+                // disturba la sessione del tag magic, i dati sono comunque già stati scritti.
+                String rData = CardReaderApi.write(null, null, userHex[0], 4, null, null, null, null, null, null);
+                Map<String, String> mData = Json.parseFlatJsonOrdered(rData);
+                boolean dataOk = !mData.containsKey("errore");
+                final String[] uidEsito = {null};
+                if (uid && dataOk) {
+                    String rUid = CardReaderApi.write(null, null, uidBlock[0], 0, null, null, null, null, null, null);
+                    Map<String, String> mUid = Json.parseFlatJsonOrdered(rUid);
+                    uidEsito[0] = mUid.containsKey("errore")
+                            ? "UID non scritto: " + mUid.get("errore") + " (serve un tag \"magic\"?)"
+                            : "UID clonato.";
+                }
+                SwingUtilities.invokeLater(() -> {
+                    scriviDest.setEnabled(true);
+                    String msg = dataOk
+                            ? "Clonato: " + mData.getOrDefault("byteScritti", "?") + " byte di dati"
+                              + (uid ? " — " + uidEsito[0] : " (UID non clonato).")
+                            : "Errore dati: " + mData.get("errore");
+                    s2.setText(msg);
+                    if (statoMain != null) statoMain.setText(msg);
+                });
+            }, "clone-write").start();
+        });
+        chiudi.addActionListener(e -> dlg.dispose());
+
+        JPanel content = colonna(
+                titoloDlg("Clonazione tag NFC (NTAG/Ultralight)"),
+                etic("Copia l'area dati (NDEF/utente) da un tag all'altro. L'UID è fissato in fabbrica:"),
+                etic("non viene clonato, quindi il token basato su UID resterà diverso."),
+                Box.createVerticalStrut(8),
+                affianca(leggiOrig, s1),
+                Box.createVerticalStrut(4),
+                cloneUid,
+                affianca(scriviDest, s2),
+                Box.createVerticalStrut(12),
+                affianca(chiudi));
+        content.setBorder(new EmptyBorder(18, 20, 18, 20));
+        dlg.setContentPane(content);
+        dlg.pack();
+        dlg.setMinimumSize(new Dimension(560, dlg.getHeight()));
+        dlg.setLocationRelativeTo(parent);
+        dialogoAperto = true;
+        try { dlg.setVisible(true); } finally { dialogoAperto = false; }
+    }
+
+    /**
+     * Estrae l'area dati utente dal dump completo (hex da pagina 0): salta le pagine 0-3
+     * (UID/lock/Capability Container) e limita alla capacità dichiarata nel CC (pagina 3, 3° byte ×8),
+     * così da non toccare lock/config del tag di destinazione. Ritorna null se il dump non è valido.
+     */
+    private static String estraiUtente(String memHex) {
+        if (memHex == null) return null;
+        String clean = memHex.replaceAll("\\s", "");
+        if (clean.length() < 32) return null;                 // serve almeno fino a pagina 3
+        int cap = -1;
+        try { cap = Integer.parseInt(clean.substring(28, 30), 16) * 8; } catch (Exception ignored) {}
+        String user = clean.substring(32);                    // da pagina 4
+        if (cap > 0 && user.length() > cap * 2) user = user.substring(0, cap * 2);
+        if (user.length() % 8 != 0) user = user.substring(0, user.length() - (user.length() % 8)); // multiplo di pagina
+        return user.isEmpty() ? null : user;
+    }
+
+    /**
+     * Estrae le pagine 0-3 (UID + BCC + lock/internal + Capability Container) dal dump, da riscrivere
+     * verbatim per clonare l'UID su un tag "magic". I BCC sono già coerenti nell'originale: si copiano
+     * tali e quali. Ritorna null se il dump è troppo corto.
+     */
+    private static String estraiUidBlock(String memHex) {
+        if (memHex == null) return null;
+        String clean = memHex.replaceAll("\\s", "");
+        return clean.length() >= 32 ? clean.substring(0, 32) : null;   // 16 byte = 4 pagine
     }
 
     private static boolean ok(String json) {

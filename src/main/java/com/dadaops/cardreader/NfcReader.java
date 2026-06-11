@@ -144,15 +144,38 @@ final class NfcReader {
         for (int off = 0; off < data.length; off += 4, page++) {
             byte[] c = new byte[4];
             System.arraycopy(data, off, c, 0, Math.min(4, data.length - off));
+            // 1) Update Binary PC/SC (storage card): funziona su molti lettori per le pagine NTAG/Ultralight.
             byte[] apdu = {(byte) 0xFF, (byte) 0xD6, 0x00, (byte) page, 0x04, c[0], c[1], c[2], c[3]};
             int s = sw(link.transmit(apdu));
-            if (s != 0x9000) {
-                if (s == 0x6D00 || s == 0x6A81)
-                    return "Scrittura non supportata dal lettore o tag in sola lettura (SW " + String.format("%04X", s) + ")";
-                return "Errore in scrittura pagina " + page + " (SW " + String.format("%04X", s) + ")";
-            }
+            if (s == 0x9000) continue;
+            // 2) Fallback ACR122U/PN532: comando nativo Type-2 WRITE (0xA2) via pseudo-APDU pass-through.
+            //    Su molti ACR122U FF D6 ritorna 6300 sugli NTAG/Ultralight: il write nativo invece passa.
+            int sn = scriviPaginaNativa(link, page, c);
+            if (sn == 0x9000) continue;
+            int shown = (sn == 0x6D00 || sn == 0x6A81 || s == 0x6D00 || s == 0x6A81) ? 0x6D00 : s;
+            if (shown == 0x6D00)
+                return "Scrittura non supportata dal lettore o tag in sola lettura (SW " + String.format("%04X", s) + ")";
+            return "Errore in scrittura pagina " + page + " (SW " + String.format("%04X", s)
+                    + ", fallback nativo SW " + String.format("%04X", sn) + ")";
         }
         return null;
+    }
+
+    /**
+     * Scrittura di una pagina col comando nativo Type-2 {@code 0xA2 <page> <4 byte>}, incapsulato nel
+     * pass-through diretto dell'ACR122U/PN532: {@code FF 00 00 00 Lc | D4 40 01 (InDataExchange, target 1) | A2 ...}.
+     * Ritorna 0x9000 se il PN532 conferma l'esecuzione (risposta {@code D5 41 00}), altrimenti la SW grezza.
+     */
+    private static int scriviPaginaNativa(CardLink link, int page, byte[] c) throws CardLinkException {
+        byte[] apdu = {(byte) 0xFF, 0x00, 0x00, 0x00, 0x09,
+                (byte) 0xD4, 0x40, 0x01, (byte) 0xA2, (byte) page, c[0], c[1], c[2], c[3]};
+        byte[] r = link.transmit(apdu);
+        int sw = sw(r);
+        if (sw != 0x9000) return sw;
+        byte[] d = data(r);                       // atteso: D5 41 <status>; status 00 = ok
+        if (d.length >= 3 && (d[0] & 0xFF) == 0xD5 && (d[1] & 0xFF) == 0x41 && (d[2] & 0xFF) == 0x00)
+            return 0x9000;
+        return 0x6300;                            // pass-through eseguito ma scrittura non confermata
     }
 
     private static int capacitaNtag(CardLink link) {
